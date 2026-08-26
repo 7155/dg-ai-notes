@@ -1,6 +1,6 @@
 # Pi Agent Book
 
-基于 Astro 5 + React 19 + MDX 的双轨电子书，承载 [Pi Agent](https://pi.dev) SDK 的两套教程。
+基于 Astro 5 + React 19 + MDX 的双轨电子书，承载 [Pi Agent](https://github.com/earendil-works/pi) 的两套教程。
 
 ## 两个系列
 
@@ -8,10 +8,10 @@
 
 | 系列 | book 值 | 章节前缀 | 规模 | 语言变体 |
 |------|---------|----------|------|----------|
-| 🚀 实战上手篇 | `practice` | P01–P07 | 7 章 | TypeScript |
+| 🚀 实战上手篇 | `practice` | P01–P08 | **8 章** | TypeScript |
 | 🔬 源码精读篇 | `internals` | M01–M10 | 10 章 | TypeScript + Python 双版本 |
 
-- **实战上手篇**：用一个真实场景（企业数据分析助手）搭一个能上线的垂直 Agent。无语言切换，每章一张卡、一个「阅读 →」按钮。
+- **实战上手篇**：用企业数据分析助手贯穿 P01–P07 的 SDK 二次开发，P08 再把单 Session Web Demo 补成真正的 Runtime 架构：多会话隔离、恢复、分叉与 Runtime 重建。
 - **源码精读篇**：系统拆解 SDK 源码设计。每章 TS + Python 双版本，顶栏一键切换。
 
 > 🌐 在线版本：https://dg-ai-notes.pages.dev
@@ -21,16 +21,9 @@
 ## 快速开始
 
 ```bash
-# 安装依赖（首次）
 npm install
-
-# 开发模式（热重载，http://localhost:4321）
-npm run dev
-
-# 生产构建（输出到 dist/）
-npm run build
-
-# 预览构建产物（http://localhost:4321）
+npm run dev      # http://localhost:4321
+npm run build    # 生产构建，输出到 dist/
 npm run preview
 ```
 
@@ -38,88 +31,100 @@ npm run preview
 
 ---
 
-## 读者使用指南
+## 源内容在哪里
 
-只想看文档不关心开发？两种方式：
-
-### 方式一：本地起站点（推荐，离线可用）
-
-```bash
-npm install && npm run dev
-# 浏览器打开 http://localhost:4321
-```
-
-### 方式二：直接读源 md 文件
-
-源文档（Markdown 原稿，无需构建）在仓库的 `../pi_source_dive/`（精读篇）与 `../pi_sdk_learn/docs/`（实战篇）目录，按系列组织：
-- 实战上手篇：`../pi_sdk_learn/docs/`
-- 源码精读 TS 版：`../pi_source_dive/typescript/`
-- 源码精读 Python 版：`../pi_source_dive/python/`
+| 内容 | 路径 |
+|------|------|
+| Web 富内容源 | `src/content/modules/` |
+| 实战上手 Markdown | `../pi_sdk_learn/docs/` |
+| 实战上手配套代码 | `../pi_sdk_learn/code/` |
+| 源码精读 TS Markdown | `../docs/typescript/` |
+| 源码精读 Python Markdown | `../docs/python/` |
 
 ### 阅读界面操作
 
 | 操作 | 效果 |
 |------|------|
-| 首页 **双入口 CTA** | 「实战上手 →」「源码精读 →」分别进入两系列第一章 |
-| 首页 **两条路怎么选** | 对比两个系列的目标/切入点/产物，给阅读路径建议 |
-| 顶栏 **TS / Python** 切换器 | （仅源码精读篇）同一章在两种语言间跳转，偏好记到 localStorage |
-| 顶栏 **☀ / 🌙** 按钮 | 浅色/深色/跟随系统三态循环，`T` 键快捷键 |
-| 顶栏 **◧ 沉浸式阅读** 按钮 / **`F`** 键 | 进入沉浸模式：右栏大纲淡出、正文加宽。仅 ≥1280px 可用 |
-| 左侧 TOC | **按系列隔离**：读实战篇时显示 P01–P07，读精读篇时显示 M01–M10 |
-| 右侧 On-This-Page | 当前页面的标题大纲，滚动时高亮当前节 |
-| 点击 SVG 图内节点 | 自动跳转到对应代码块并高亮（源码精读篇已布好锚点） |
-| 底部 **← 上章 / 下章 →** | **系列内连续阅读**：两系列互不串台 |
+| 首页双入口 | 「实战上手」「源码精读」分别进入两系列 |
+| 顶栏 TS / Python | 仅源码精读篇显示语言切换 |
+| `F` / 沉浸式阅读 | 右栏淡出、正文加宽（宽屏） |
+| 左侧 TOC | **按系列隔离**：P01–P08 与 M01–M10 不串台 |
+| 右侧 On-This-Page | 当前页面标题大纲 |
+| 底部 ← 上章 / 下章 → | **同系列内**按 `displayOrder` 连续阅读 |
 
 ---
 
 ## 内容系统设计
 
-### content collection
-
-`src/content/config.ts` 定义一个 `modules` collection，关键字段：
+`src/content/config.ts` 的关键 frontmatter：
 
 ```yaml
-book: internals | practice   # 系列（默认 internals）
-module: M01..M10 | P01..P07  # 章节号（正则 ^[MP]\d+(\.\d+)?$）
-variant: ts | python          # 语言变体（实战篇只有 ts）
-counterpart: <slug>           # 源码精读篇：TS↔Python 配对 slug
-displayOrder: <number>        # 系列内排序（两系列各自从 1 起）
+book: internals | practice
+module: M01..M10 | P01..P08
+variant: ts | python
+displayOrder: <number>
+status: published | draft | planned
 ```
 
-- **系列隔离**：`collection.ts` 的 `getAllModules(book?)`、`getAdjacentModules(order, book)` 都按 `book` 过滤，保证 TOC、prev/next、首页分组互不串台。
-- **无 Python 变体**：实战篇不声明 `counterpart`，`ModuleLayout` 的 LanguageSwitcher 自动隐藏。
+系列隔离由两处共同保证：
 
-### mdx 源与 md 快照
+```text
+frontmatter.book
+      ↓
+getPublishedModules(book)
+      ↓
+getAdjacentModules(order, book)
+      ↓
+TOC / PrevNext 只在自己的系列里移动
+```
 
-- `src/content/modules/` 是 web 富内容源（mdx，27 个文件）
-- `../pi_source_dive/` 与 `../pi_sdk_learn/docs/` 是下载版快照（md），改内容以 mdx 为准，手动同步 md
+所以 P08 的 `displayOrder: 8` 不会和 M08 串章。
 
-> ⚠️ mdx 比 md 严格：表格/正文里的裸 `{...}` 会被当 JS 表达式执行（须用反引号包裹），`<br>` 须写成自闭合 `<br/>`。
+### P08 的新增桥梁
+
+```text
+P07
+Browser → Express/SSE → 一个 AgentSession
+
+P08
+conversationId
+    ↓
+Durable Session / Session Tree
+    ↓
+AgentSessionRuntime
+    ↓
+AgentSession → Agent → Agent Loop
+```
+
+P08 同时有：
+
+- Web MDX：`src/content/modules/pr08-runtime-architecture.mdx`
+- Markdown：`../pi_sdk_learn/docs/第8章-Agent服务Runtime架构-从单Session到多会话服务.md`
+- 配套代码：`../pi_sdk_learn/code/L08-runtime/08-runtime-lifecycle.ts`
 
 ---
 
 ## 主要功能
 
-| 能力 | 说明 |
-|------|------|
-| **三栏阅读布局** | 左 TOC / 正文 / 右大纲，1279px 以下隐藏右栏，767px 以下转汉堡菜单 |
-| **沉浸式阅读模式** | `F` 键切换，右栏淡出、正文加宽，CSS transition 平滑过渡。仅 ≥1280px 生效 |
-| **双系列首页** | 双入口 Hero + 选路指南 + 两段章节网格（实战篇带强调色背景，排在前） |
-| **TS/Python 双版本** | （源码精读篇）每章并排两个 mdx，URL 各自独立，顶栏一键切换 |
-| **代码块增强** | Shiki 语法高亮 + 语言标签 + 一键复制 + 30 行以上自动折叠 |
-| **SVG 图表联动** | 点击图内节点自动滚动到对应代码块（源码精读篇五步管道图等） |
-| **章节字数/阅读时长** | 构建时读 mdx 源文件实时计算（CJK 按字 + 英文按词），改内容自动跟随 |
+- 三栏阅读布局：左 TOC / 正文 / 右大纲
+- 双系列首页与系列内导航
+- 源码精读篇 TS/Python 双版本
+- Shiki 代码高亮、复制、长代码折叠
+- SVG 图表与正文锚点联动
+- 构建时统计字数、代码行数与阅读时长
 
 ---
 
-## 构建/校验命令
+## 构建 / 校验
 
 ```bash
-npm run build              # 生产构建（当前 30 页全绿）
-npm run check:counterpart  # 校验源码精读篇 TS/Python frontmatter 一致性
-npm run build:pdf          # 导出源码精读篇 PDF（TS + Python）
+npm run build
+npm run check:counterpart
+npm run build:pdf
 ```
+
+> P08 只有 TypeScript 版，因此不需要 Python counterpart；`book: practice` 的章节也不会参与源码精读篇的语言配对逻辑。
 
 ## 许可
 
-代码采用 [MIT License](../LICENSE)，文档采用 [CC-BY-SA-4.0](https://creativecommons.org/licenses/by-sa/4.0/)。
+代码采用 [MIT License](../../LICENSE)，文档采用 [CC-BY-SA-4.0](https://creativecommons.org/licenses/by-sa/4.0/)。

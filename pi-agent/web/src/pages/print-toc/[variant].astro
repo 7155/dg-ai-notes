@@ -16,7 +16,7 @@ export async function getStaticPaths() {
 
 const variant = (Astro.params.variant === 'python' ? 'python' : 'ts') as 'ts' | 'python';
 
-const all = await getPublishedModules('pi-agent');
+const all = await getPublishedModules('internals');
 const chapters = groupByChapter(all);
 
 const rows = chapters.map(ch => {

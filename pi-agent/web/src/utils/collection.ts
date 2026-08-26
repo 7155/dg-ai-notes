@@ -14,9 +14,38 @@ export interface ModuleStats {
 export interface GroupedChapter {
   module: string;
   displayOrder: number;
+  book: 'internals' | 'practice';
   tsEntry?: ModuleEntry;
   pythonEntry?: ModuleEntry;
 }
+
+/** 系列元信息：用于首页、TOC 分组、面包屑等展示 */
+export interface SeriesMeta {
+  book: 'internals' | 'practice';
+  label: string;          // 中文展示名
+  eyebrow: string;        // 章节眉标前缀
+  tagline: string;        // 一句话定位
+  audience: string;       // 适合谁
+  badge?: string;         // 角标（如"NEW"，标识新增系列）
+}
+
+export const SERIES_META: Record<'internals' | 'practice', SeriesMeta> = {
+  internals: {
+    book: 'internals',
+    label: '源码学习',
+    eyebrow: '源码学习',
+    tagline: '10 章拆解一个生产级 Agent SDK 的设计与实现',
+    audience: '想看懂 Harness 设计、理解 Agent 内部运转的工程师',
+  },
+  practice: {
+    book: 'practice',
+    label: '实战上手',
+    eyebrow: '实战上手',
+    tagline: '基于 pi-agent 二次开发，7 章搭一个能上线的垂直 Agent',
+    audience: '想用 pi-agent SDK 做自己 Agent、二次开发的开发者',
+    badge: 'NEW',
+  },
+};
 
 const CJK_RE = /[\u4e00-\u9fa5]/g;
 const WORD_RE = /[a-zA-Z][a-zA-Z0-9_-]*/g;
@@ -77,7 +106,7 @@ export async function getPublishedModules(book?: string): Promise<ModuleEntry[]>
 }
 
 /**
- * 把扁平的 ModuleEntry 列表按 data.module（M01/M02/...）分组。
+ * 把扁平的 ModuleEntry 列表按 data.module（M01/M02/.../P01/P02/...）分组。
  * 每组包含 tsEntry 和/或 pythonEntry，displayOrder 取该 module 第一条的值。
  * 组按 displayOrder 升序排列。
  */
@@ -89,6 +118,7 @@ export function groupByChapter(entries: ModuleEntry[]): GroupedChapter[] {
       map.set(key, {
         module: key,
         displayOrder: entry.data.displayOrder,
+        book: entry.data.book,
       });
     }
     const group = map.get(key)!;
@@ -105,8 +135,12 @@ export async function getModuleBySlug(slug: string): Promise<ModuleEntry | undef
   return (await getAllModules()).find(m => m.slug === slug);
 }
 
-export async function getAdjacentModules(currentOrder: number) {
-  const all = await getPublishedModules();
+/**
+ * 同一系列内的相邻章节（prev/next）。
+ * 系列隔离：源码精读篇与实战上手篇互不串台。
+ */
+export async function getAdjacentModules(currentOrder: number, book: 'internals' | 'practice') {
+  const all = await getPublishedModules(book);
   const prev = all.filter(m => m.data.displayOrder < currentOrder).pop();
   const next = all.filter(m => m.data.displayOrder > currentOrder).shift();
   return { prev, next };

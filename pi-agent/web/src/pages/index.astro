@@ -1,11 +1,40 @@
 ---
 // src/pages/index.astro
 import BaseLayout from '../layouts/BaseLayout.astro';
+import TopBar from '../components/TopBar.astro';
 import Hero from '../components/home/Hero.astro';
 import ModuleGrid from '../components/home/ModuleGrid.astro';
 ---
 
-<BaseLayout title="Pi Agent Book · 源码精读笔记">
+<BaseLayout title="Pi Agent 双轨教程 · 实战上手 + 源码学习">
+  <TopBar />
   <Hero />
-  <ModuleGrid book="pi-agent" />
+
+  <!-- 双轨目录：源码学习在左、实战上手(NEW)在右，完整列出所有章节 -->
+  <section class="dual-tracks">
+    <div class="dual-tracks-inner">
+      <ModuleGrid book="internals" />
+      <ModuleGrid book="practice" />
+    </div>
+  </section>
 </BaseLayout>
+
+<style>
+.dual-tracks {
+  padding: var(--space-4) var(--space-6) var(--space-16);
+}
+.dual-tracks-inner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+  align-items: stretch; /* 两列等高 */
+}
+@media (max-width: 960px) {
+  .dual-tracks-inner {
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+  }
+}
+</style>

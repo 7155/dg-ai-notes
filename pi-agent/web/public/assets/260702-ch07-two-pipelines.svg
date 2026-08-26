@@ -1,0 +1,118 @@
+  <svg viewBox="0 0 960 640" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#57534e"/>
+      </marker>
+      <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#b5523a"/>
+      </marker>
+      <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#2d6e3c"/>
+      </marker>
+    </defs>
+
+    <rect width="960" height="640" fill="#faf7f2"/>
+
+    <!-- ===== TOP: event source ===== -->
+    <rect x="330" y="36" width="300" height="64" rx="6" fill="rgba(28,25,23,0.04)" stroke="#57534e" stroke-width="1"/>
+    <text x="480" y="62" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif"
+          text-anchor="middle">Agent 内核发出一个事件</text>
+    <text x="480" y="82" fill="#57534e" font-size="10" font-family="'Geist Mono', monospace"
+          text-anchor="middle" letter-spacing="0.08em">10 种 AgentEvent 之一</text>
+
+    <!-- fork lines from source -->
+    <path d="M 420 100 Q 420 150 200 190" fill="none" stroke="#b5523a" stroke-width="1.2" marker-end="url(#arrow-red)"/>
+    <path d="M 540 100 Q 540 150 760 190" fill="none" stroke="#2d6e3c" stroke-width="1.2" marker-end="url(#arrow-green)"/>
+
+    <!-- divider -->
+    <line x1="480" y1="120" x2="480" y2="540" stroke="rgba(28,25,23,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+
+    <!-- ===== LEFT: Pipeline A (subscribe) ===== -->
+    <rect x="40" y="190" width="400" height="56" rx="6" fill="rgba(181,82,58,0.06)" stroke="#b5523a" stroke-width="1"/>
+    <text x="240" y="214" fill="#b5523a" font-size="11" font-weight="600" font-family="'Geist Mono', monospace"
+          text-anchor="middle" letter-spacing="0.14em">管道 A · session.subscribe</text>
+    <text x="240" y="232" fill="#57534e" font-size="10" font-family="'Geist', sans-serif"
+          text-anchor="middle">你在脚本里注册 · 只能看，不能改</text>
+
+    <!-- the await behavior box -->
+    <rect x="40" y="266" width="400" height="120" rx="6" fill="rgba(181,82,58,0.03)" stroke="#b5523a" stroke-width="0.8" stroke-dasharray="4,4"/>
+    <text x="60" y="290" fill="#b5523a" font-size="10" font-family="'Geist Mono', monospace"
+          letter-spacing="0.14em">AGENT 的态度</text>
+
+    <text x="60" y="316" fill="#1c1917" font-size="14" font-family="'Geist', sans-serif">
+      ✗ <tspan font-weight="600">不等</tspan>　通知一声就走
+    </text>
+    <text x="60" y="338" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      · 返回值被丢弃（listener 返回什么 Agent 都不读）
+    </text>
+    <text x="60" y="354" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      · 改不了 Agent 的行为（只能旁观）
+    </text>
+    <text x="60" y="370" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      · async listener 的错误会被静默吞掉
+    </text>
+
+    <!-- source code line -->
+    <rect x="40" y="400" width="400" height="40" rx="4" fill="rgba(28,25,23,0.04)" stroke="rgba(28,25,23,0.15)" stroke-width="0.8"/>
+    <text x="240" y="425" fill="#b5523a" font-size="11" font-family="'Geist Mono', monospace"
+          text-anchor="middle">this._emit(event)　　// 同步，不等</text>
+
+    <!-- ===== RIGHT: Pipeline B (pi.on) ===== -->
+    <rect x="520" y="190" width="400" height="56" rx="6" fill="rgba(45, 110, 60, 0.06)" stroke="#2d6e3c" stroke-width="1"/>
+    <text x="720" y="214" fill="#2d6e3c" font-size="11" font-weight="600" font-family="'Geist Mono', monospace"
+          text-anchor="middle" letter-spacing="0.14em">管道 B · 扩展系统 pi.on</text>
+    <text x="720" y="232" fill="#57534e" font-size="10" font-family="'Geist', sans-serif"
+          text-anchor="middle">写在扩展里 · 能拦、能改、能干预</text>
+
+    <!-- the await behavior box -->
+    <rect x="520" y="266" width="400" height="120" rx="6" fill="rgba(45, 110, 60, 0.03)" stroke="#2d6e3c" stroke-width="0.8" stroke-dasharray="4,4"/>
+    <text x="540" y="290" fill="#2d6e3c" font-size="10" font-family="'Geist Mono', monospace"
+          letter-spacing="0.14em">AGENT 的态度</text>
+
+    <text x="540" y="316" fill="#1c1917" font-size="14" font-family="'Geist', sans-serif">
+      ✓ <tspan font-weight="600">等</tspan>　读完你的返回值才走
+    </text>
+    <text x="540" y="338" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      · 返回值被 Agent 读取（如 { block: true } 就拦）
+    </text>
+    <text x="540" y="354" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      · 能改变 Agent 的下一步（拦工具 / 改上下文）
+    </text>
+    <text x="540" y="370" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      · 框架对 handler 做异常隔离（不连累别人）
+    </text>
+
+    <!-- source code line -->
+    <rect x="520" y="400" width="400" height="40" rx="4" fill="rgba(28,25,23,0.04)" stroke="rgba(28,25,23,0.15)" stroke-width="0.8"/>
+    <text x="720" y="425" fill="#2d6e3c" font-size="11" font-family="'Geist Mono', monospace"
+          text-anchor="middle">await this._emitExtensionEvent(event)　// 等</text>
+
+    <!-- typical uses -->
+    <text x="60" y="466" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace"
+          letter-spacing="0.14em">典型用途</text>
+    <text x="60" y="484" fill="#1c1917" font-size="10" font-family="'Geist', sans-serif">
+      流式渲染 · 日志 · SSE 转发 · 统计 token
+    </text>
+
+    <text x="540" y="466" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace"
+          letter-spacing="0.14em">典型用途</text>
+    <text x="540" y="484" fill="#1c1917" font-size="10" font-family="'Geist', sans-serif">
+      拦截危险操作 · 审计 · 注入动态上下文
+    </text>
+
+    <!-- Bottom: design decision -->
+    <line x1="40" y1="520" x2="920" y2="520" stroke="rgba(28,25,23,0.10)" stroke-width="0.8"/>
+
+    <text x="40" y="544" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace"
+          letter-spacing="0.14em">DESIGN DECISION</text>
+
+    <text x="40" y="570" fill="#1c1917" font-size="12" font-family="'Instrument Serif', 'Source Han Serif SC', serif" font-style="italic">
+      "等 vs 不等" 是两条管道的根本分水岭 —— 因为要读返回值，所以必须等。
+    </text>
+    <text x="40" y="592" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      两条管道喂的是同一个事件源；差别只在"Agent 等不等你""读不读你的返回值"。
+    </text>
+    <text x="40" y="612" fill="#57534e" font-size="10" font-family="'Geist', sans-serif">
+      能干预是"等 + 读返回值"的自然结果，不是单独赋予的能力。
+    </text>
+  </svg>

@@ -331,7 +331,7 @@ execute: Callable[
 
 `onUpdate` 推出的消息最终流向哪里？这个问题很重要——它是下一章"消息系统"的核心议题，那里会展开。这里只需要记住：工具执行不是黑盒，进度可观察。
 
-如果 `tool.execute()` 抛出异常怎么办？别担心，§四 会详细讲这是怎么处理的——剧透一句：异常会被翻译成一条 `isError: True` 的消息发给模型。
+如果 `tool.execute()` 抛出异常怎么办？别担心，§四 会详细讲这是怎么处理的——剧透一句：异常会被翻译成一条 `isError: true` 的消息发给模型。
 
 ### 第 5 步：afterToolCall——后置钩子（可修改结果）
 
@@ -378,7 +378,7 @@ execute: Callable[
 
 这条消息会被追加到对话历史中，在下一轮循环里作为上下文发给模型。模型看到"文件内容是这样的"，然后决定下一步——可能要编辑，可能要再读别的文件，可能直接回答用户。
 
-**所有错误最终都变成了同一种东西：一条 `isError: True` 的 ToolResultMessage。** 模型看到错误消息，知道出错了，然后自己决定怎么处理。这个设计为什么是最佳实践？§四 会详细展开。
+**所有错误最终都变成了同一种东西：一条 `isError: true` 的 ToolResultMessage。** 模型看到错误消息，知道出错了，然后自己决定怎么处理。这个设计为什么是最佳实践？§四 会详细展开。
 
 ---
 
@@ -484,7 +484,7 @@ return await execute_tool_calls_parallel(...)
 
 ## 四、永不抛出：工具出错也是一条消息
 
-前面 §二 的五步管道里，每一步出错都被编码成了 `isError: True` 的 ToolResultMessage。看起来错误已经被处理了。
+前面 §二 的五步管道里，每一步出错都被编码成了 `isError: true` 的 ToolResultMessage。看起来错误已经被处理了。
 
 但你可能会问：万一 `tool.execute()` 内部抛了一个未捕获的异常呢？工具开发者写代码时什么情况都可能发生——文件不存在、权限拒绝、命令超时、JSON 解析失败。这些异常如果不处理，就会一路穿透管道，打断 Agent Loop。
 
@@ -492,16 +492,16 @@ return await execute_tool_calls_parallel(...)
 
 ### 错误的统一出口：6 种错误，1 种产物
 
-回看整个五步管道，工具调用的每一步都可能出错。但你会发现一个惊人的规律：**不管哪一步出错，最终产物都是同一种东西——一条 `isError: True` 的 ToolResultMessage。**
+回看整个五步管道，工具调用的每一步都可能出错。但你会发现一个惊人的规律：**不管哪一步出错，最终产物都是同一种东西——一条 `isError: true` 的 ToolResultMessage。**
 
 | 哪一步出错 | 怎么处理 | 最终产物 |
 |-----------|---------|---------|
-| 工具未找到 | 直接返回错误结果，不进入管道 | `ToolResultMessage { isError: True, content: "Tool xxx not found" }` |
-| prepareArguments 抛异常 | 被 try-except 捕获 | `ToolResultMessage { isError: True, content: 异常信息 }` |
-| Schema 验证失败 | 被 try-except 捕获 | `ToolResultMessage { isError: True, content: 验证错误描述 }` |
-| beforeToolCall 阻止 | 返回阻止结果 | `ToolResultMessage { isError: True, content: 阻止原因 }` |
-| **tool.execute 抛异常** | 被 executePreparedToolCall 的 try-except 捕获 | `ToolResultMessage { isError: True, content: 异常信息 }` |
-| afterToolCall 抛异常 | 被 finalizeExecutedToolCall 的 try-except 捕获 | `ToolResultMessage { isError: True, content: 异常信息 }` |
+| 工具未找到 | 直接返回错误结果，不进入管道 | `ToolResultMessage { isError: true, content: "Tool xxx not found" }` |
+| prepareArguments 抛异常 | 被 try-except 捕获 | `ToolResultMessage { isError: true, content: 异常信息 }` |
+| Schema 验证失败 | 被 try-except 捕获 | `ToolResultMessage { isError: true, content: 验证错误描述 }` |
+| beforeToolCall 阻止 | 返回阻止结果 | `ToolResultMessage { isError: true, content: 阻止原因 }` |
+| **tool.execute 抛异常** | 被 executePreparedToolCall 的 try-except 捕获 | `ToolResultMessage { isError: true, content: 异常信息 }` |
+| afterToolCall 抛异常 | 被 finalizeExecutedToolCall 的 try-except 捕获 | `ToolResultMessage { isError: true, content: 异常信息 }` |
 
 注意表格的右列——**所有错误的最终形态都是 ToolResultMessage**。没有一种错误会以"抛异常"的形式逃出管道。
 
@@ -759,11 +759,11 @@ async def execute(tool_call_id, params, signal, on_update):
 1. **能识别的错误一定要包装**：附上"是什么错、为什么、怎么办"的线索。比如"文件不存在"比"操作失败"强 10 倍；"文件 /a.ts 不存在，目录下有 [b.ts, c.ts]"比"文件不存在"又强 10 倍。
 2. **识别不了的不要硬编码描述**：直接 `raise err`，让框架兜底 except 把 `str(err)` 透传出去。**不要写 `raise Exception("操作失败")` 这种笼统描述**——那等于把所有未知错误都涂成同一种颜色，模型无法区分。
 
-**这就是为什么"即便未知错误也要变成一条消息"**——不是说"对未知错误统一描述成'出错了'"，而是说"让框架兜底 except 接管，至少保证未知异常也被翻译成 `isError: True` 的消息发给模型，而不是穿透打断循环"。错误描述本身还是要尽量具体；只有真的无从识别时，才让 `str(err)` 原样透传给模型。
+**这就是为什么"即便未知错误也要变成一条消息"**——不是说"对未知错误统一描述成'出错了'"，而是说"让框架兜底 except 接管，至少保证未知异常也被翻译成 `isError: true` 的消息发给模型，而不是穿透打断循环"。错误描述本身还是要尽量具体；只有真的无从识别时，才让 `str(err)` 原样透传给模型。
 
 ### 一句话总结
 
-工具执行出错时，Pi 不抛异常打断循环，而是把错误编码成一条 `isError: True` 的 ToolResultMessage 发给模型。这里的关键是**两层分工**：工具内部尽量识别已知错误，包装成"为什么错、怎么改"的具体描述（参考 Bash 工具的 try-except）；框架兜底层只在工具没识别出来时接管，把 `str(error)` 原样透传给模型。模型拿到具体的错误信息后，自己决定下一步——重试、换路径、向用户解释。这就是为什么 Pi 的 Agent Loop 能在工具频繁失败的真实场景下保持稳定运行。
+工具执行出错时，Pi 不抛异常打断循环，而是把错误编码成一条 `isError: true` 的 ToolResultMessage 发给模型。这里的关键是**两层分工**：工具内部尽量识别已知错误，包装成"为什么错、怎么改"的具体描述（参考 Bash 工具的 try-except）；框架兜底层只在工具没识别出来时接管，把 `str(error)` 原样透传给模型。模型拿到具体的错误信息后，自己决定下一步——重试、换路径、向用户解释。这就是为什么 Pi 的 Agent Loop 能在工具频繁失败的真实场景下保持稳定运行。
 
 ---
 
@@ -920,7 +920,7 @@ Read 工具不需要写文件，所以 `ReadOperations` 没有 `writeFile`。Gre
 
 **2. 管道+钩子模式**：核心流程是一条管道（prepare → validate → execute），管道前后各有一个钩子（before/after），可以拦截或修改。管道内的每一步出错都不抛异常，统一编码为正常消息。
 
-**3. 错误即消息原则**：工具执行的每一步出错，都统一编码成一条 `isError: True` 的 ToolResultMessage 发给模型。模型自己根据错误信息决定下一步——重试、换路径、向用户解释。即便未知异常也用 `str(error)` 兜底成消息，绝不让原始异常穿透打断 Agent Loop。
+**3. 错误即消息原则**：工具执行的每一步出错，都统一编码成一条 `isError: true` 的 ToolResultMessage 发给模型。模型自己根据错误信息决定下一步——重试、换路径、向用户解释。即便未知异常也用 `str(error)` 兜底成消息，绝不让原始异常穿透打断 Agent Loop。
 
 **4. Operations 抽象法**：工具不直接调用系统 API，而是通过最小化的 Operations 接口间接调用。测试可以 Mock，远程可以 SSH，不改工具代码。
 
@@ -948,7 +948,7 @@ ToolResultMessage { content: 文件内容, isError: false }
     ▼ 追加到对话历史，下一轮发给模型
 ```
 
-工具不是简单的函数调用，而是一条受控管道。参数验证挡住垃圾数据，钩子拦截住危险操作，Operations 抽象让同一份代码既能本地跑也能远程跑。所有工具错误——从参数验证失败到 execute 抛出的未知异常——都被翻译成一条 `isError: True` 的 ToolResultMessage 发给模型，让模型自己决定下一步，循环永远不会因为工具出错而崩。
+工具不是简单的函数调用，而是一条受控管道。参数验证挡住垃圾数据，钩子拦截住危险操作，Operations 抽象让同一份代码既能本地跑也能远程跑。所有工具错误——从参数验证失败到 execute 抛出的未知异常——都被翻译成一条 `isError: true` 的 ToolResultMessage 发给模型，让模型自己决定下一步，循环永远不会因为工具出错而崩。
 
 但还有一个问题：工具执行时发出的 `tool_execution_start`、`tool_execution_update`、`tool_execution_end` 事件，到底是谁在监听？Agent 内核为什么完全不需要知道 UI 的存在？
 

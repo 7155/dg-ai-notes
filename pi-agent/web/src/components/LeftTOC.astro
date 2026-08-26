@@ -2,12 +2,15 @@
 // src/components/LeftTOC.astro
 // Shows all TS-variant modules in the left sidebar; highlights current.
 // 标题可点击收起/展开，状态记到 localStorage（key: pi-agent-book:toc-collapsed）。
-import { getAllModules, type ModuleEntry } from '../utils/collection';
+import { getAllModules, SERIES_META, type ModuleEntry } from '../utils/collection';
 
 interface Props { currentEntry: ModuleEntry; }
 const { currentEntry } = Astro.props;
-const allModules = (await getAllModules()).filter(m => m.data.variant === 'ts');
+// 系列隔离：只展示当前章节所属系列的 TS 版目录
+const allModules = (await getAllModules(currentEntry.data.book))
+  .filter(m => m.data.variant === 'ts');
 const currentBaseSlug = currentEntry.slug.replace(/\.python$/, '');
+const seriesLabel = SERIES_META[currentEntry.data.book].label;
 ---
 
 <nav class="toc" id="left-toc" aria-label="目录">
@@ -18,7 +21,7 @@ const currentBaseSlug = currentEntry.slug.replace(/\.python$/, '');
     aria-controls="toc-list"
   >
     <span class="toc-toggle-bar" aria-hidden="true"></span>
-    <span class="toc-toggle-label">CONTENTS</span>
+    <span class="toc-toggle-label">{seriesLabel}目录</span>
     <svg class="toc-toggle-caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
       <path d="M2.5 3.5L5 6.5L7.5 3.5" stroke="currentColor" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
@@ -82,7 +85,7 @@ const currentBaseSlug = currentEntry.slug.replace(/\.python$/, '');
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.05em;
   color: var(--soft);
   transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }

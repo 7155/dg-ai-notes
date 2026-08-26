@@ -8,7 +8,7 @@ import { getAdjacentModules, type ModuleEntry } from '../utils/collection';
 
 interface Props { entry: ModuleEntry; }
 const { entry } = Astro.props;
-const { prev, next } = await getAdjacentModules(entry.data.displayOrder);
+const { prev, next } = await getAdjacentModules(entry.data.displayOrder, entry.data.book);
 
 // Pre-compute Python variant URLs server-side from counterpart frontmatter.
 // Empty string means "no Python variant" — the client script skips those.

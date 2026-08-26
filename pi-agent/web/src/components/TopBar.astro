@@ -8,14 +8,69 @@ const { entry } = Astro.props;
 const title = entry
   ? `${entry.data.module} / ${entry.data.title}${entry.data.variant === 'python' ? ' · Python' : ''}`
   : 'Pi Agent Book';
+
+// 作者信息（来自仓库 README）
+const author = {
+  name: '冬瓜',
+  bio: '热衷于拆解 AI 工程的博主',
+  repo: 'https://github.com/buchidonggua/dg-ai-notes',
+  repoDisplay: 'github.com/buchidonggua/dg-ai-notes',
+  douyinQr: '/assets/donghua-douyin-qr.png',
+  bilibiliQr: '/assets/donghua-bilibili-qr.jpg',
+};
 ---
 
 <header class="topbar">
-  <button class="hamburger" aria-label="打开目录" aria-expanded="false">☰</button>
-  <a href="/" class="brand">Pi Agent <span class="brand-accent">·</span> Book</a>
+  <div class="left-cluster">
+    <button class="hamburger" aria-label="打开目录" aria-expanded="false">☰</button>
+    <a href="/" class="brand">Pi Agent <span class="brand-accent">·</span> Book</a>
+  </div>
   <nav class="crumb" aria-label="breadcrumb">{title}</nav>
   <div class="actions">
+    <button
+      class="immersive-toggle"
+      type="button"
+      data-immersive-toggle
+      aria-pressed="false"
+      aria-label="切换沉浸式阅读"
+      title="沉浸式阅读 (F)"
+    >
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M3 4.5h5v11H3zM12 4.5h5v11h-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M7.5 10h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1.5 2"/>
+      </svg>
+      <span class="immersive-toggle-label">沉浸式阅读</span>
+    </button>
     <ThemeToggle />
+
+    <!-- 作者信息：常驻可见（头像首字 + 昵称 + 简介 + GitHub），二维码 hover 展开 -->
+    <div class="author-menu">
+      <a class="author-trigger" href={author.repo} target="_blank" rel="noopener noreferrer" aria-label={`访问 ${author.name} 的 GitHub`}>
+        <span class="author-avatar">{author.name.charAt(0)}</span>
+        <span class="author-text">
+          <span class="author-name">{author.name}</span>
+          <span class="author-bio">{author.bio}</span>
+        </span>
+        <svg class="author-github-icon" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+
+      <!-- 二维码详情：hover/focus 展开（常驻区已含主要信息，二维码为补充） -->
+      <div class="author-card" role="tooltip">
+        <p class="author-card-hint">扫码关注，交流 AI / Agent / LLM 工程实践</p>
+        <div class="author-card-qrs">
+          <figure class="qr-item">
+            <img src={author.douyinQr} alt={`${author.name}的抖音二维码`} loading="lazy" width="110" height="110" />
+            <figcaption>抖音 · {author.name}</figcaption>
+          </figure>
+          <figure class="qr-item">
+            <img src={author.bilibiliQr} alt={`${author.name}的B站二维码`} loading="lazy" width="110" height="110" />
+            <figcaption>B 站 · {author.name}</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -55,6 +110,13 @@ const title = entry
     background: var(--topbar-bg);
   }
 
+  .left-cluster {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
   .brand {
     font-family: var(--font-display);
     font-size: 22px;
@@ -72,12 +134,181 @@ const title = entry
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    flex: 1 1 auto;
+    padding: 0 var(--space-4);
   }
 
   .actions {
     display: flex;
     gap: var(--space-3);
     align-items: center;
+  }
+
+  /* 沉浸式阅读按钮：图标 + 中文文字 */
+  .immersive-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 32px;
+    padding: 0 var(--space-3);
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 9999px;
+    color: var(--soft);
+    font-family: var(--font-body);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease),
+                color var(--dur-fast) var(--ease),
+                border-color var(--dur-fast) var(--ease);
+  }
+  .immersive-toggle:hover {
+    background: var(--paper-sunken);
+    color: var(--ink);
+    border-color: var(--soft);
+  }
+  .immersive-toggle:focus-visible {
+    outline: var(--outline-w) solid var(--accent);
+    outline-offset: var(--outline-offset);
+  }
+  .immersive-toggle-label { letter-spacing: 0.02em; }
+
+  /* 沉浸按钮激活态 */
+  .immersive-toggle[aria-pressed="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* ===== 作者信息：常驻可见署名条 + 二维码 hover 展开 ===== */
+  .author-menu {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .author-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 36px;
+    padding: 0 var(--space-3) 0 4px;
+    border: 1px solid var(--rule);
+    border-radius: 9999px;
+    color: var(--ink);
+    text-decoration: none;
+    background: var(--paper-raised);
+    transition: border-color var(--dur-fast) var(--ease),
+                box-shadow var(--dur-fast) var(--ease);
+  }
+  .author-trigger:hover,
+  .author-menu:focus-within .author-trigger {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  /* 头像圆点：首字「冬」 */
+  .author-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--paper);
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .author-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+  }
+  .author-name {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-strong);
+  }
+  .author-bio {
+    font-size: 10px;
+    color: var(--soft);
+    letter-spacing: 0.01em;
+  }
+  .author-github-icon {
+    color: var(--soft);
+    flex-shrink: 0;
+    transition: color var(--dur-fast) var(--ease);
+  }
+  .author-trigger:hover .author-github-icon {
+    color: var(--accent);
+  }
+
+  /* 二维码卡片：默认隐藏，hover/focus 展开（常驻区已含主要信息） */
+  .author-card {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 60;
+    width: 280px;
+    padding: var(--space-4) var(--space-5) var(--space-5);
+    background: var(--paper-raised);
+    border: var(--border-w) solid var(--rule);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-3);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-6px);
+    transition: opacity var(--dur-fast) var(--ease),
+                transform var(--dur-fast) var(--ease),
+                visibility var(--dur-fast);
+    pointer-events: none;
+  }
+  .author-menu:hover .author-card,
+  .author-menu:focus-within .author-card {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  .author-card-hint {
+    margin: 0 0 var(--space-3);
+    text-align: center;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    font-style: italic;
+  }
+  .author-card-qrs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+  .qr-item {
+    margin: 0;
+    text-align: center;
+  }
+  .qr-item img {
+    display: block;
+    width: 100%;
+    max-width: 110px;
+    height: auto;
+    margin: 0 auto;
+    border-radius: var(--radius-sm);
+    background: #fff;
+    padding: 4px;
+    transition: transform var(--dur-base) var(--ease);
+  }
+  .qr-item img:hover {
+    transform: scale(1.06);
+  }
+  .qr-item figcaption {
+    margin-top: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--soft);
+    letter-spacing: 0.02em;
   }
 
   .hamburger { display: none; }
@@ -94,5 +325,11 @@ const title = entry
       margin-right: var(--space-3);
       line-height: 1;
     }
+    /* 小屏隐藏沉浸按钮文字，只保留图标，避免挤占 */
+    .immersive-toggle-label { display: none; }
+    .immersive-toggle { padding: 0; width: 32px; justify-content: center; }
+    /* 小屏作者区：只留头像圆点 + GitHub 图标，隐藏昵称简介 */
+    .author-text { display: none; }
+    .author-trigger { padding: 0 8px 0 4px; height: 32px; }
   }
 </style>

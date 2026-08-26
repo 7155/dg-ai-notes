@@ -11,5 +11,8 @@ dist/
 *.playwright.png
 screenshot-*.png
 
+# 首页改版过程中的对照截图
+/hero-*.png
+
 # PDF 导出产物
 dist-pdf/

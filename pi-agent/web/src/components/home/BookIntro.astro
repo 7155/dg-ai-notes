@@ -1,6 +1,6 @@
 ---
 // src/components/home/BookIntro.astro
-// 可复用的项目介绍块。丛书化后，每本书的 Hero 都可以用它。
+// Pi Agent 项目介绍卡片：放回 Hero 右侧（第一版设计）。
 interface Props {
   name: string;
   description: string;
@@ -21,11 +21,11 @@ const displayUrl = githubUrl.replace(/^https?:\/\//, '');
 
 <style>
 .book-intro {
-  padding: var(--space-8) var(--space-8);
+  padding: var(--space-12) var(--space-8);
   border-left: 4px solid var(--accent);
   background: var(--paper-raised);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  box-shadow: 0 1px 0 var(--rule);
+  box-shadow: var(--shadow-2);
   text-align: left;
 }
 .book-intro-heading {
@@ -33,15 +33,16 @@ const displayUrl = githubUrl.replace(/^https?:\/\//, '');
   font-size: var(--fs-body);
   color: var(--accent);
   letter-spacing: 0.06em;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-8);
   text-transform: uppercase;
 }
 .book-intro-desc {
-  font-size: 20px;
+  font-size: 22px;
   line-height: var(--lh-prose);
   color: var(--ink-strong);
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--space-6);
   font-family: var(--font-display);
+  font-weight: 400;
 }
 .book-intro-link {
   display: inline-block;

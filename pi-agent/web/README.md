@@ -1,8 +1,18 @@
 # Pi Agent Book
 
-基于 Astro 5 + React 19 + MDX 的源码精读电子书，系统性拆解 [Pi Agent](https://pi.dev) SDK 的架构与实现。
+基于 Astro 5 + React 19 + MDX 的双轨电子书，承载 [Pi Agent](https://pi.dev) SDK 的两套教程。
 
-10 个章节（ch01~ch10）覆盖：开篇总览、三层架构、Agent Loop、模型调用、工具系统、消息系统、事件驱动、上下文工程、上下文压缩、会话管理。**TypeScript + Python 双版本齐全**（20 个 mdx 文件），顶栏一键切换。**为什么有 Python 版**：Pi Agent 原作是 TypeScript，转写版方便只熟悉 Python 的读者聚焦设计本身。
+## 两个系列
+
+电子书用一个 Astro content collection（`modules`）承载两个系列，靠 frontmatter 的 `book` 字段区分：
+
+| 系列 | book 值 | 章节前缀 | 规模 | 语言变体 |
+|------|---------|----------|------|----------|
+| 🚀 实战上手篇 | `practice` | P01–P07 | 7 章 | TypeScript |
+| 🔬 源码精读篇 | `internals` | M01–M10 | 10 章 | TypeScript + Python 双版本 |
+
+- **实战上手篇**：用一个真实场景（企业数据分析助手）搭一个能上线的垂直 Agent。无语言切换，每章一张卡、一个「阅读 →」按钮。
+- **源码精读篇**：系统拆解 SDK 源码设计。每章 TS + Python 双版本，顶栏一键切换。
 
 > 🌐 在线版本：https://dg-ai-notes.pages.dev
 
@@ -24,7 +34,7 @@ npm run build
 npm run preview
 ```
 
-**环境要求**：Node.js ≥ 18，任意现代浏览器。
+**环境要求**：Node.js ≥ 20，任意现代浏览器。
 
 ---
 
@@ -41,29 +51,50 @@ npm install && npm run dev
 
 ### 方式二：直接读源 md 文件
 
-源文档（Markdown 原稿，无需构建）在仓库的 `../docs/` 目录：
-- TS 版原稿：`../docs/typescript/`
-- Python 版原稿：`../docs/python/`
+源文档（Markdown 原稿，无需构建）在仓库的 `../pi_source_dive/`（精读篇）与 `../pi_sdk_learn/docs/`（实战篇）目录，按系列组织：
+- 实战上手篇：`../pi_sdk_learn/docs/`
+- 源码精读 TS 版：`../pi_source_dive/typescript/`
+- 源码精读 Python 版：`../pi_source_dive/python/`
 
 ### 阅读界面操作
 
 | 操作 | 效果 |
 |------|------|
-| 顶栏 **TS / Python** 切换器 | 同一章在两种语言间跳转，偏好记到 localStorage，下次自动应用 |
+| 首页 **双入口 CTA** | 「实战上手 →」「源码精读 →」分别进入两系列第一章 |
+| 首页 **两条路怎么选** | 对比两个系列的目标/切入点/产物，给阅读路径建议 |
+| 顶栏 **TS / Python** 切换器 | （仅源码精读篇）同一章在两种语言间跳转，偏好记到 localStorage |
 | 顶栏 **☀ / 🌙** 按钮 | 浅色/深色/跟随系统三态循环，`T` 键快捷键 |
-| 左侧 TOC | 章节层级导航（hover 显示模块号 M01-M10） |
-| 右侧 On-This-Page | 当前页面的二级/三级标题大纲，滚动时高亮当前节 |
-| 点击 SVG 图内节点 | 自动跳转到对应代码块并高亮（Ch3 Agent Loop 已布好锚点） |
-| 点击图片 | 放大查看，`Esc` 或滚轮缩放退出 |
-| 底部 **← 上章 / 下章 →** | 按 displayOrder 顺序连续阅读（ch01 → ch10 一条主线） |
+| 顶栏 **◧ 沉浸式阅读** 按钮 / **`F`** 键 | 进入沉浸模式：右栏大纲淡出、正文加宽。仅 ≥1280px 可用 |
+| 左侧 TOC | **按系列隔离**：读实战篇时显示 P01–P07，读精读篇时显示 M01–M10 |
+| 右侧 On-This-Page | 当前页面的标题大纲，滚动时高亮当前节 |
+| 点击 SVG 图内节点 | 自动跳转到对应代码块并高亮（源码精读篇已布好锚点） |
+| 底部 **← 上章 / 下章 →** | **系列内连续阅读**：两系列互不串台 |
 
-### 章节结构
+---
 
+## 内容系统设计
+
+### content collection
+
+`src/content/config.ts` 定义一个 `modules` collection，关键字段：
+
+```yaml
+book: internals | practice   # 系列（默认 internals）
+module: M01..M10 | P01..P07  # 章节号（正则 ^[MP]\d+(\.\d+)?$）
+variant: ts | python          # 语言变体（实战篇只有 ts）
+counterpart: <slug>           # 源码精读篇：TS↔Python 配对 slug
+displayOrder: <number>        # 系列内排序（两系列各自从 1 起）
 ```
-ch01 开篇总览    →  ch02 三层架构   →  ch03 Agent Loop  →  ch04 模型调用  →  ch05 工具系统
-                                                                       ↓
-ch06 消息系统    →  ch07 事件驱动   →  ch08 上下文工程  →  ch09 上下文压缩  →  ch10 会话管理
-```
+
+- **系列隔离**：`collection.ts` 的 `getAllModules(book?)`、`getAdjacentModules(order, book)` 都按 `book` 过滤，保证 TOC、prev/next、首页分组互不串台。
+- **无 Python 变体**：实战篇不声明 `counterpart`，`ModuleLayout` 的 LanguageSwitcher 自动隐藏。
+
+### mdx 源与 md 快照
+
+- `src/content/modules/` 是 web 富内容源（mdx，27 个文件）
+- `../pi_source_dive/` 与 `../pi_sdk_learn/docs/` 是下载版快照（md），改内容以 mdx 为准，手动同步 md
+
+> ⚠️ mdx 比 md 严格：表格/正文里的裸 `{...}` 会被当 JS 表达式执行（须用反引号包裹），`<br>` 须写成自闭合 `<br/>`。
 
 ---
 
@@ -71,17 +102,23 @@ ch06 消息系统    →  ch07 事件驱动   →  ch08 上下文工程  →  ch
 
 | 能力 | 说明 |
 |------|------|
-| **三栏阅读布局** | 左 TOC（240px）/ 正文（720px）/ 右大纲（240px），1279px 以下隐藏右栏，767px 以下转汉堡菜单 |
-| **TS/Python 双版本** | 每章并排两个 mdx：`chXX-xxx.mdx`（TS 版）+ `chXX-xxx.python.mdx`（Python 改写版）。URL 各自独立（`/modules/ch03-agent-loop` vs `/modules/ch03-agent-loop.python`），顶栏 LanguageSwitcher 一键切换，偏好记到 localStorage |
+| **三栏阅读布局** | 左 TOC / 正文 / 右大纲，1279px 以下隐藏右栏，767px 以下转汉堡菜单 |
+| **沉浸式阅读模式** | `F` 键切换，右栏淡出、正文加宽，CSS transition 平滑过渡。仅 ≥1280px 生效 |
+| **双系列首页** | 双入口 Hero + 选路指南 + 两段章节网格（实战篇带强调色背景，排在前） |
+| **TS/Python 双版本** | （源码精读篇）每章并排两个 mdx，URL 各自独立，顶栏一键切换 |
 | **代码块增强** | Shiki 语法高亮 + 语言标签 + 一键复制 + 30 行以上自动折叠 |
-| **SVG 图表联动** | 点击图内节点自动滚动到对应代码块（S2 双向联动）；目前已在 **Ch5 工具系统五步管道图** 实现，其他章节待扩展（Phase 4-C）。点击图片放大查看（lightbox 支持 Esc/滚轮缩放） |
-| **交互式 Islands** | 3 个 React 组件按需水合：S3 Partial Message 时间线 / S4 错误防线演示（均挂载在 Ch3 Agent Loop）/ S5 首页知识图谱（10 节点新结构） |
-| **章节字数/阅读时长** | 详情页 header 与首页"全部章节"卡片都显示 `xxxx字 · 含 N 行代码 · 约 M 分钟`。`collection.ts:getModuleStats()` 在构建时读 mdx 源文件实时计算（CJK 按字 + 英文按词，代码块单独算非空行不计入字数，阅读时长 = 字数/300）。改了 mdx 内容自动跟随，无需维护 |
-| **主题切换** | 浅色/深色/跟随系统三态，无 FOUC（anti-FOUC 脚本在 `<head>` 中同步执行），跨标签页同步 + `T` 键快捷键 |
-| **无障碍** | WAI-ARIA tabs 键盘模式（ArrowLeft/Right/Home/End）、`:focus-visible` 焦点环、`prefers-reduced-motion` 双层覆盖（CSS @media + JS matchMedia） |
-| **设计令牌** | 颜色/字号/间距/圆角/阴影/动效全部走 `tokens.css` 的 CSS 变量，深色主题独立精调 |
+| **SVG 图表联动** | 点击图内节点自动滚动到对应代码块（源码精读篇五步管道图等） |
+| **章节字数/阅读时长** | 构建时读 mdx 源文件实时计算（CJK 按字 + 英文按词），改内容自动跟随 |
 
 ---
+
+## 构建/校验命令
+
+```bash
+npm run build              # 生产构建（当前 30 页全绿）
+npm run check:counterpart  # 校验源码精读篇 TS/Python frontmatter 一致性
+npm run build:pdf          # 导出源码精读篇 PDF（TS + Python）
+```
 
 ## 许可
 

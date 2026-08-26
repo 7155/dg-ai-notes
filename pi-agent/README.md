@@ -14,6 +14,10 @@
 
 > 本教程基于 Pi **v0.80.2** 编写。源码链接指向 [earendil-works/pi](https://github.com/earendil-works/pi) main 分支，可能与 v0.80.2 有微小差异。
 
+## 📝 学习记录
+
+- [2026-08-26 · 模型调用、工具系统与事件机制](./docs/typescript/学习笔记-2026-08-26-模型调用工具系统与事件机制.md) — M04/M05 追问整理：Tool 执行流水线、Extension Loader、`pi` / `factory`、Operations、`pi.on` vs `subscribe`、事件传播、Coding Agent 消息与 `convertToLlm()`。
+
 ## 🗺️ 章节结构
 
 ```

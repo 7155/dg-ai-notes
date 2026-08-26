@@ -22,11 +22,11 @@ export interface GroupedChapter {
 /** 系列元信息：用于首页、TOC 分组、面包屑等展示 */
 export interface SeriesMeta {
   book: 'internals' | 'practice';
-  label: string;          // 中文展示名
-  eyebrow: string;        // 章节眉标前缀
-  tagline: string;        // 一句话定位
-  audience: string;       // 适合谁
-  badge?: string;         // 角标（如"NEW"，标识新增系列）
+  label: string;
+  eyebrow: string;
+  tagline: string;
+  audience: string;
+  badge?: string;
 }
 
 export const SERIES_META: Record<'internals' | 'practice', SeriesMeta> = {
@@ -41,7 +41,7 @@ export const SERIES_META: Record<'internals' | 'practice', SeriesMeta> = {
     book: 'practice',
     label: '实战上手',
     eyebrow: '实战上手',
-    tagline: '基于 pi-agent 二次开发，7 章搭一个能上线的垂直 Agent',
+    tagline: '基于 pi-agent 二次开发，8 章从 Agent Demo 走到真正的 Runtime 服务',
     audience: '想用 pi-agent SDK 做自己 Agent、二次开发的开发者',
     badge: 'NEW',
   },
@@ -52,45 +52,28 @@ const WORD_RE = /[a-zA-Z][a-zA-Z0-9_-]*/g;
 
 /**
  * 从 entry.id 解析 mdx 源文件的绝对路径。
- * Astro content collection (type:'content') 的 entry.id 是相对 content 目录的路径，
- * 形如 'ch01-overview.md' 或 'ch01-overview.python.md'。
  */
 function resolveEntryPath(entry: ModuleEntry): string {
   return path.resolve(process.cwd(), 'src/content/modules', entry.id);
 }
 
-/**
- * 统计 mdx 源文件的字数 / 代码行数 / 阅读时长。
- *
- * 口径：
- *   - 正文字数 = 中文字符数（按字计）+ 英文连续字母组数（按词计）
- *   - 代码行数 = 围栏代码块内非空行数（不计入正文字数）
- *   - 阅读时长 = ceil(正文字数 / 200)，最少 1 分钟（技术文档需停下来思考，按 200 字/分钟估算）
- */
+/** 统计 MDX 的字数 / 代码行数 / 阅读时长。 */
 export function getModuleStats(entry: ModuleEntry): ModuleStats {
   const raw = readFileSync(resolveEntryPath(entry), 'utf-8');
-
-  // 剥离 frontmatter（--- 包裹的 YAML 头）
   const body = raw.replace(/^---[\s\S]*?---\s*\n/, '');
-
-  // 提取所有围栏代码块（``` 围起），统计非空行数
   const codeMatches = [...body.matchAll(/```[^\n`]*\n([\s\S]*?)```/g)];
   const codeLines = codeMatches.reduce(
     (sum, m) => sum + m[1].split('\n').filter((l) => l.trim().length > 0).length,
     0,
   );
-
-  // 正文 = 全文 - frontmatter - 代码块 - JSX 标签 - mdx 表达式
   const prose = body
-    .replace(/```[\s\S]*?```/g, ' ') // 去代码块
-    .replace(/<[^>]+\/?>/g, ' ') // 去 JSX 标签
-    .replace(/\{[^}]*\}/g, ' '); // 去 mdx 表达式 { ... }
-
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/<[^>]+\/?>/g, ' ')
+    .replace(/\{[^}]*\}/g, ' ');
   const cjk = (prose.match(CJK_RE) || []).length;
   const en = (prose.match(WORD_RE) || []).length;
   const wordCount = cjk + en;
   const readMinutes = Math.max(1, Math.ceil(wordCount / 200));
-
   return { wordCount, codeLines, readMinutes };
 }
 
@@ -105,11 +88,7 @@ export async function getPublishedModules(book?: string): Promise<ModuleEntry[]>
   return (await getAllModules(book)).filter(m => m.data.status === 'published');
 }
 
-/**
- * 把扁平的 ModuleEntry 列表按 data.module（M01/M02/.../P01/P02/...）分组。
- * 每组包含 tsEntry 和/或 pythonEntry，displayOrder 取该 module 第一条的值。
- * 组按 displayOrder 升序排列。
- */
+/** 按 M01/P01 等 module id 分组。 */
 export function groupByChapter(entries: ModuleEntry[]): GroupedChapter[] {
   const map = new Map<string, GroupedChapter>();
   for (const entry of entries) {
@@ -135,10 +114,7 @@ export async function getModuleBySlug(slug: string): Promise<ModuleEntry | undef
   return (await getAllModules()).find(m => m.slug === slug);
 }
 
-/**
- * 同一系列内的相邻章节（prev/next）。
- * 系列隔离：源码精读篇与实战上手篇互不串台。
- */
+/** 同一系列内的相邻章节，源码精读与实战上手互不串台。 */
 export async function getAdjacentModules(currentOrder: number, book: 'internals' | 'practice') {
   const all = await getPublishedModules(book);
   const prev = all.filter(m => m.data.displayOrder < currentOrder).pop();
@@ -153,7 +129,6 @@ export function getVariantUrl(entry: ModuleEntry): string {
 
 export function getCounterpartUrl(entry: ModuleEntry): string | null {
   if (!entry.data.counterpart) return null;
-  // counterpart 字段值是 slug（含或不含 .python 后缀）
   const isPy = entry.data.variant === 'ts';
   const base = `/modules/${entry.data.counterpart.replace(/\.python$/, '')}`;
   return isPy ? `${base}/python` : base;

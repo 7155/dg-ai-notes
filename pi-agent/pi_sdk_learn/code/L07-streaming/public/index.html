@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DataAgent · 流式对话</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #232734;
+    --accent: #4f9cf9; --accent-hover: #6db0ff;
+    --text: #e6e6e6; --dim: #8a8f9c;
+    --tool: #1a2e2e; --tool-bd: #2a4a4a; --tool-accent: #4fc3f7;
+    --think: #2a2a1a; --error: #3a1a1a; --ok: #4caf50;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* 顶部状态栏 */
+  #header {
+    background: var(--surface); padding: 10px 18px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #2a2d36; flex-shrink: 0;
+  }
+  #header h1 { font-size: 15px; font-weight: 600; }
+  #header h1 span { color: var(--accent); }
+  #status { font-size: 13px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  #dot.busy { background: #ff9800; animation: pulse .8s infinite; }
+  #dot.err  { background: #f44336; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* 对话区 */
+  #chat { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .bubble { max-width: 78%; padding: 11px 15px; border-radius: 12px; line-height: 1.65; white-space: pre-wrap; animation: in .25s ease; }
+  .bubble.user { align-self: flex-end; background: var(--surface2); border-bottom-right-radius: 4px; }
+  .bubble.ai   { align-self: flex-start; background: var(--surface); border-bottom-left-radius: 4px; min-width: 40px; }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } }
+
+  /* 工具卡片 */
+  .tool { align-self: flex-start; background: var(--tool); border: 1px solid var(--tool-bd);
+          border-radius: 8px; padding: 9px 13px; max-width: 80%; animation: in .25s ease; }
+  .tool .t-head { font-size: 13px; color: var(--tool-accent); font-weight: 600; }
+  .tool .t-args { font-size: 12px; color: var(--dim); margin-top: 3px; font-family: ui-monospace, monospace; word-break: break-all; }
+  .tool .t-res  { font-size: 13px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--tool-bd); white-space: pre-wrap; }
+  .tool .t-res.err { color: #ef5350; }
+  .tool .t-status { font-size: 11px; color: var(--dim); margin-top: 5px; }
+
+  /* 思考块 */
+  .think { align-self: flex-start; background: var(--think); border-radius: 8px; padding: 7px 13px;
+           font-size: 12px; color: #aaa; font-style: italic; max-width: 72%; white-space: pre-wrap; }
+
+  .loading span { display: inline-block; width: 5px; height: 5px; background: var(--dim);
+                  border-radius: 50%; margin-left: 3px; animation: bounce 1.2s infinite; }
+  .loading span:nth-child(2) { animation-delay: .2s; }
+  .loading span:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+  /* 输入区 */
+  #input { background: var(--surface); padding: 11px 18px; display: flex; gap: 9px;
+           border-top: 1px solid #2a2d36; flex-shrink: 0; }
+  #msg { flex: 1; background: var(--bg); border: 1px solid #3a3d46; border-radius: 7px;
+         padding: 10px 13px; color: var(--text); font-size: 14px; resize: none; outline: none; font-family: inherit; }
+  #msg:focus { border-color: var(--accent); }
+  button { border: none; border-radius: 7px; padding: 0 18px; font-size: 14px; font-weight: 600;
+           cursor: pointer; transition: opacity .15s; font-family: inherit; }
+  #send { background: var(--accent); color: #fff; }
+  #send:hover { background: var(--accent-hover); }
+  #stop { background: #3a3d46; color: var(--text); display: none; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  #hint { text-align: center; color: var(--dim); font-size: 13px; line-height: 1.8; }
+  #hint em { color: var(--accent); font-style: normal; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>DataAgent <span>· 流式对话</span></h1>
+  <div id="status"><span id="dot"></span><span id="status-text">就绪</span></div>
+</div>
+
+<div id="chat">
+  <div id="hint">
+    向数据分析助手提问，工具调用会显示成卡片<br />
+    试试：<em>「华东地区笔记本卖了多少？」</em> 或 <em>「对比华东和华南的总销售额」</em>
+  </div>
+</div>
+
+<div id="input">
+  <textarea id="msg" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
+    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+  <button id="send" onclick="send()">发送</button>
+  <button id="stop" onclick="stop()">停止</button>
+</div>
+
+<script>
+const chat = document.getElementById("chat");
+const msgInput = document.getElementById("msg");
+const sendBtn = document.getElementById("send");
+const stopBtn = document.getElementById("stop");
+const dot = document.getElementById("dot");
+const statusText = document.getElementById("status-text");
+const hint = document.getElementById("hint");
+
+let bubble = null;             // 当前正在流式填充的助手气泡
+let thinkBlock = null;         // 当前思考块
+let isBusy = false;
+let currentController = null;  // 当前请求的 AbortController，点「停止」时 abort 它
+
+// ── 事件分发：把一条 SSE 事件 render 到页面上 ──
+function handleEvent(type, data) {
+  if (type === "text") {
+    // 文本片段 → 追加到当前气泡（打字机效果）
+    ensureBubble();
+    bubble.textContent += data.delta;
+    scroll();
+  } else if (type === "thinking") {
+    // 思考过程 → 思考块
+    if (!thinkBlock) {
+      thinkBlock = document.createElement("div");
+      thinkBlock.className = "think";
+      chat.appendChild(thinkBlock);
+    }
+    thinkBlock.textContent += data.delta;
+    scroll();
+  } else if (type === "tool_start") {
+    // 工具开跑 → 显示「执行中」卡片
+    const card = document.createElement("div");
+    card.className = "tool";
+    card.id = "tool-" + data.id;
+    card.innerHTML =
+      `<div class="t-head">🔧 ${data.name}</div>` +
+      `<div class="t-args">${JSON.stringify(data.args)}</div>` +
+      `<div class="t-status">执行中…<span class="loading"><span></span><span></span><span></span></span></div>`;
+    chat.appendChild(card);
+    thinkBlock = null; // 新工具开跑，清掉旧思考块（下一轮思考另起一块）
+    scroll();
+  } else if (type === "tool_end") {
+    // 工具跑完 → 用结果更新卡片
+    const card = document.getElementById("tool-" + data.id);
+    if (!card) return;
+    const res = card.querySelector(".t-res") || (() => {
+      const d = document.createElement("div"); d.className = "t-res"; card.appendChild(d); return d;
+    })();
+    res.className = "t-res" + (data.isError ? " err" : "");
+    res.textContent = (data.isError ? "❌ " : "✅ ") + data.result;
+    const st = card.querySelector(".t-status"); if (st) st.textContent = "完成";
+    scroll();
+  } else if (type === "done") {
+    // 一轮彻底结束 → 恢复输入框
+    if (bubble) bubble.dataset.done = "1";
+    thinkBlock = null;
+    setBusy(false);
+  } else if (type === "error") {
+    const e = document.createElement("div");
+    e.className = "bubble ai";
+    e.style.color = "#ef5350";
+    e.textContent = "出错：" + data.message;
+    chat.appendChild(e);
+  }
+}
+
+// ── UI 辅助 ──
+function ensureBubble() {
+  if (!bubble || bubble.dataset.done) {
+    if (hint) hint.style.display = "none";
+    bubble = document.createElement("div");
+    bubble.className = "bubble ai";
+    chat.appendChild(bubble);
+  }
+}
+function scroll() { chat.scrollTop = chat.scrollHeight; }
+function setStatus(text, kind) {
+  statusText.textContent = text;
+  dot.className = kind === "busy" ? "busy" : kind === "err" ? "err" : "";
+}
+function setBusy(b) {
+  isBusy = b;
+  sendBtn.style.display = b ? "none" : "";
+  stopBtn.style.display = b ? "" : "none";
+  msgInput.disabled = b;
+  if (!b) msgInput.focus();
+  setStatus(b ? "思考中…" : "就绪", b ? "busy" : "ok");
+}
+
+// ── 发送：fetch POST，响应体就是 SSE 流，用 getReader 逐块读 ──
+async function send() {
+  const message = msgInput.value.trim();
+  if (!message || isBusy) return;
+  setBusy(true);
+
+  // 渲染用户气泡
+  const u = document.createElement("div");
+  u.className = "bubble user";
+  u.textContent = message;
+  chat.appendChild(u);
+  scroll();
+
+  bubble = null;
+  thinkBlock = null;
+  msgInput.value = "";
+
+  // ★ 用 AbortController 持有这次请求，点「停止」时 abort 它
+  const ctrl = new AbortController();
+  currentController = ctrl;
+
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+
+    // ★ 响应体就是 SSE 流，逐块读、按「两个换行」切出每条消息
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE 每条消息以 \n\n 结尾，按它切
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const raw = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        // 每条消息形如 `data: {"type":"...","data":{...}}`，取 data: 那行解析
+        const line = raw.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const { type, data } = JSON.parse(line.slice(6));
+        handleEvent(type, data);
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      // 用户主动点「停止」中断了请求，不算错误；连接已断，done 收不到，手动恢复 UI
+      setBusy(false);
+    } else {
+      const e = document.createElement("div");
+      e.className = "bubble ai";
+      e.style.color = "#ef5350";
+      e.textContent = "请求失败：" + err.message;
+      chat.appendChild(e);
+      setBusy(false);
+    }
+  } finally {
+    currentController = null;
+  }
+}
+
+// ── 停止：中断当前请求 = 通知服务端「客户端走了」，服务端 req close 会 abort Agent ──
+function stop() {
+  if (currentController) currentController.abort();
+}
+
+msgInput.focus();
+</script>
+</body>
+</html>

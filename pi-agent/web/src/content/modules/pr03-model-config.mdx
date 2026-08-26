@@ -1,0 +1,372 @@
+---
+title: 第3章：模型配置关键点 —— 判断企业内网的模型能否接入 pi
+module: P03
+displayOrder: 3
+status: published
+variant: ts
+book: practice
+summary: 多 Provider 管理、运行时动态注入 Key，以及企业内网模型能否接入 pi 的判断清单与 models.json 实战配置。
+prev: pr02-architecture
+next: pr04-system-prompt
+---
+
+## 一、这章到底要解决什么问题
+
+第 1 章你跑通了第一个 Agent，但只配了一个 Provider。真实业务里，你大概率会遇到下面这几种情况之一：
+
+- **想换模型**：日常问答用便宜模型先跑着，遇到复杂问题再切推理模型；
+- **想接多个 Provider**：客服走 A 厂商、代码助手走 B 厂商，按业务线分流；
+- **想接入企业内网或本地部署**：公司搭了一套大模型平台，或者你自己用 Ollama 起了模型，怎么让 Pi Agent 调它？（先说清楚一件事：内网自建的模型服务「号称 OpenAI 兼容」不代表真兼容，第二节会讲怎么验证、差异太大怎么兜底）
+
+本章把它们一次讲清楚——第一节讲内置 Provider 怎么配、Key 怎么管（含运行时动态注入 Key 的 API）；第二节讲自定义 Provider 怎么接，**讲怎么判断内网网关能不能直接接**。
+
+---
+
+## 二、内置 Provider 配置
+
+### 2.1 models.json 的结构回顾
+
+第 1 章你已经写过 `~/.pi/agent/models.json` 了，这里再把它的结构讲细一点。一个 Provider 的定义长这样：
+
+```json
+{
+  "providers": {
+    "你的Provider名": {
+      "baseUrl": "https://api.example.com/v1",
+      "api": "openai-completions",
+      "apiKey": "你的_API_KEY",
+      "models": [
+        { "id": "model-id", "name": "显示名" }
+      ]
+    }
+  }
+}
+```
+
+几个关键点：
+
+- **`providers` 下每个键，就是 Provider 名**（如 `openai`、`deepseek`），后续 `provider/id` 组合，就是模型的唯一标识；
+- **`api` 字段决定接口协议**：绝大多数国内厂商和兼容服务都用 `"openai-completions"`，Anthropic 用 `"anthropic-messages"`，Google 用 `"google-generative-ai"`，Mistral 用 `"mistral-conversations"`，AWS Bedrock 用 `"bedrock-converse-stream"`，Azure OpenAI 用 `"azure-openai-responses"`——完整清单见 SDK 源码 `packages/ai/src/types.ts` 的 `KnownApi` 类型；
+- **`models` 数组**：这个 Provider 提供哪些模型。严格说每个模型**只有 `id` 是必需的**，`name` 可不填（不填时 SDK 直接用 `id` 当显示名，源码 `modelFromJson()` 里是 `name ?? id`）——但示例习惯两个都写上。
+
+`models.json` 里可以同时配多个 Provider，Pi Agent 会把它们都加载进来。
+
+### 2.2 模型对象的其他常见字段
+
+第 1 章你只用了 `provider`、`id`、`name` 三个字段。还有几个常见有用字段：
+
+```json
+{
+  "id": "glm-4-air",
+  "name": "GLM-4-Air",
+  "reasoning": false,
+  "input": ["text"],
+  "contextWindow": 128000,
+  "maxTokens": 16384
+}
+```
+
+| 字段 | 含义 | 何时需要手填 |
+|------|------|-------------|
+| `reasoning` | 是否是推理模型 | 接入推理模型（如 o3、DeepSeek-R1）时设 `true` |
+| `input` | 支持的输入类型 | 多模态模型填 `["text", "image"]` |
+| `contextWindow` | 上下文窗口大小 | 影响对话过长时的自动压缩行为 |
+| `maxTokens` | 单次最大输出 token | 不填用默认值 |
+
+不填的字段会用默认值，**通常 `id` + `name` 就够跑通**，其余字段等你遇到具体问题再回来补。
+
+> **什么是「推理模型」（reasoning）？** 就是回答前会先「思考」一遍的模型，比如 OpenAI o3、DeepSeek-R1、Qwen3 的思考模式。
+>
+> 普通模型你问它，它张口就答；推理模型会在内部先跑一段思考链（chain-of-thought），把复杂问题拆开想清楚再答——更准，但更慢更贵。
+>
+> `reasoning: true` 就是告诉 Pi Agent「这模型支持思考模式」。
+
+第 1 章用 `getAvailable().find(...)` 选模型，写法稍长。你要是已经知道想用哪个模型，用 `getModel()` 更直接：
+
+```typescript
+const model = modelRuntime.getModel("zhipu", "glm-4-air");
+if (!model) throw new Error("模型不存在，请检查 models.json");
+```
+
+`getModel(provider, id)` 是同步方法，返回 `Model | undefined`。它**不检查 Key 是否存在**——就算没配 Key 也能拿到模型对象，但真去调用时才会失败。
+
+### 2.3 运行时切换模型：setModel()
+
+什么场景会需要在对话过程中换模型？最典型的是**成本路由**——同一份产品，简单问题走便宜模型省成本，复杂问题走推理模型保质量。
+
+举个例子，客服系统里：用户问「快递到哪了」，便宜的小模型就够；用户问「帮我看看这合同有没有坑」，就切推理模型。
+
+你也可以按业务线分流：闲聊走 A 厂商、代码助手走 B 厂商。这些都不用开两个进程，一个会话里动态切就行。
+
+`session.setModel()` 就是这个切换 API：
+
+```typescript
+// 简单问题切到便宜的小模型
+// getModel() 返回的可能是 undefined（模型不存在时）；
+// 末尾的 ! 是 TS 的「非空断言」——告诉编译器「我确定它不是 undefined，到运行时才检查」
+// 实际项目里更稳的写法是先判空：const m = getModel(...); if (!m) return;
+await session.setModel(modelRuntime.getModel("zhipu", "glm-4-flash")!);
+await session.prompt("今天天气怎么样？");
+
+// 复杂推理切到推理模型
+await session.setModel(modelRuntime.getModel("deepseek", "deepseek-reasoner")!);
+await session.prompt("证明：任意三角形内角和为 180 度。");
+```
+
+切换后，**后续所有 `prompt()` 都用新模型**，但对话历史保留。这是按业务路由请求的关键 API。
+
+> ⚠️ **`setModel()` 会先校验目标模型的 Key**：如果目标模型所在的 provider 没配任何 Key（models.json / auth.json / 环境变量 / `setRuntimeApiKey` 都没有），`setModel()` 会直接抛 `No API key for ...` 错误（源码 `agent-session.ts` 的 `setModel` 内部先调 `checkAuth()`）。所以动态切换前，先确认目标 provider 的 Key 已就位，否则照抄上面的示例会出错。
+
+---
+
+## 三、API Key 的 4 种管理方式
+
+到这里你已经能自由切模型了。但 Key 怎么管？Pi Agent 给了 4 种方式，从简单到进阶：
+
+（看一眼就好，千万不要试图去记住，咱这AI时代了，有限的脑容量要拿来记更有价值的东西）
+
+| 方式 | 怎么做 | 什么时候用 |
+|------|--------|-----------|
+| ① models.json 直接写 | provider 里加 `"apiKey": "sk-xxx"` | 本地开发、demo（**别把含 Key 的 models.json 提交 git**） |
+| ② 环境变量 | `export DEEPSEEK_API_KEY=sk-xxx` | CI/CD、容器部署，Key 从 Secret Manager 注入。注意变量名是**内置 Provider 的硬编码白名单**（完整对应表见 SDK 源码 `packages/ai/src/env-api-keys.ts`），自定义 Provider 名没有自动环境变量查找 |
+| ③ auth.json（推荐） | `~/.pi/agent/auth.json` 写 `{ "zhipu": { "type": "api_key", "key": "sk-xxx" } }` | 本地多 Provider 开发：Key 集中管理，models.json 只放模型定义、可以放心提交 git。注意是 `type` + `key`（跟 models.json 的 `apiKey` 字段名不一样） |
+| ④ setRuntimeApiKey | `await modelRuntime.setRuntimeApiKey("zhipu", "sk-xxx")`（返回 Promise，必须 await） | Web 多用户：每个用户登录后从数据库取自己的 Key 注入内存，进程结束自动消失；密钥不落盘的安全场景 |
+
+**优先级：`setRuntimeApiKey` > `auth.json` > `models.json` 的 `apiKey` 字段 > 环境变量**。同一个 Provider 配了多种来源时，取最高的那个——注意和直觉相反：**models.json 里写死的字面 Key 会盖过环境变量**（环境变量只在没有任何其它来源时才兜底生效；唯一的例外是 models.json 用 `"$VAR"` 插值语法时两边是同一个值，没冲突）。
+
+
+
+---
+
+## 四、自定义 Provider：接入企业内网和本地部署
+
+到这里，内置 Provider 配置已经够 90% 场景了。但如果你遇到下面这些情况：
+
+- 公司内部搭了一套大模型平台，接口长得像 OpenAI，但 URL 不一样；
+- 自己用 Ollama / vLLM / LM Studio 起了本地模型；
+- 想接某个 Pi Agent 还没内置的小众 Provider。
+
+这些都不用写代码——只要对方是 OpenAI 兼容接口，在 `models.json` 里填对 `baseUrl` 就能用。下面拿 Ollama 举例（企业内网同理）。
+
+### 4.1 用 models.json 接 OpenAI 兼容服务
+
+绝大多数国内厂商、本地部署工具（Ollama、vLLM、LM Studio）都兼容 OpenAI 接口。比如接 Ollama：
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "models": [
+        { "id": "qwen2.5:7b", "name": "Qwen2.5 7B" },
+        { "id": "llama3.2:3b", "name": "Llama 3.2 3B" }
+      ]
+    }
+  }
+}
+```
+
+Ollama 本地服务默认不需要 Key，但 OpenAI SDK 要求 `apiKey` 字段必须有值，填个占位字符串 `"ollama"` 就行。
+
+**`baseUrl` 路径截断规则**：只填到 `/v1` 这一级，**不要**带 `/chat/completions`——SDK 会自动拼接。这是新手最容易犯的错：
+
+```
+完整端点:      http://localhost:11434/v1/chat/completions
+baseUrl 应为:  http://localhost:11434/v1
+                                       ↑
+                            SDK 自动拼接 /chat/completions
+```
+
+企业内网接口同理，把 `baseUrl` 改成公司内网地址就行。
+
+
+
+### 4.2 企业内网模型：先验证，再接入
+
+很多大企业不会让 LLM 厂商的接口直接暴露给业务系统——中间会搭一层**网关**（也就是企业自建的模型接口服务），做鉴权、计费、审计。这层网关往往会对 OpenAI 接口做二次封装：删掉某些字段、改某些默认值、甚至不实现某些能力。结果就是「号称 OpenAI 兼容，实际有差异」。
+
+**别急着接。** 正确的做法是：先搞清楚 Pi Agent 对服务端有什么硬性要求，再拿核对清单逐条对照——**小差异用 `compat` 对齐，大差异用转换层兜底，一切以实际测试为准**。
+
+#### 4.2.1 Pi Agent 对模型服务的硬性要求
+
+> **不只是 OpenAI 一种协议**：本章聚焦最通用的 `openai-completions` 协议——绝大多数国内厂商、Ollama、vLLM 都兼容它。但 Pi Agent 还内置了 `anthropic-messages`、`google-generative-ai`、`mistral-conversations`、`bedrock-converse-stream`、`azure-openai-responses` 等协议，每种都有**独立的请求/响应解析模块**（源码 `packages/ai/src/api/` 下分文件存放，互不通用）。
+>
+> 如果企业接口是其它模式，把 `api` 字段换成对应的协议名（如 `"anthropic-messages"`）即可。每个协议各有一套自己的 `compat` 字段，别把本文讲的配置套到别的协议上。
+
+`api: "openai-completions"` 这条协议，本质上就是 Pi Agent 按 OpenAI Chat Completions 规范组装请求、解析响应。请求体的组装逻辑在 SDK 源码 `packages/ai/src/api/openai-completions.ts` 的 `buildParams()` 函数里。简化到最基本形态，Pi Agent 发出去的请求长这样：
+
+```
+POST {baseUrl}/chat/completions
+Content-Type: application/json
+Authorization: Bearer <key>          ← 只要 Key 解析成功就必然带上（SDK 自动添加，不用手动配）
+
+{
+  "model": "你的模型id",
+  "messages": [
+    { "role": "system", "content": "..." },
+    { "role": "user", "content": "..." }
+  ],
+  "stream": true,
+  "stream_options": { "include_usage": true },
+  "store": false
+}
+```
+
+由此可以反推出三条硬性要求：
+
+1. **接口形态**（openai-completions 协议下）：必须是 `POST {baseUrl}/chat/completions`，请求体是 OpenAI 风格的 `messages` 数组。所以 `baseUrl` 里**只填到 `/v1` 这一级**、**别把 `/chat/completions` 也写进去**，否则会拼出双路径。
+2. **必须支持 SSE 流式**：Pi Agent 永远以 `stream: true` 发请求，**没有非流式模式**。不支持流式的服务接不进来。
+3. **鉴权**：走标准 `Authorization: Bearer <key>`——只要 Key 解析成功，请求就必然带上这个头。
+
+除了这三条硬要求，其它字段（`tools` / `temperature` / `max_completion_tokens` / 各种思考参数）都是「按需发」——服务端不认，就靠 compat 关掉。
+
+#### 4.2.2 拿到企业接口文档，怎么判定能不能接
+
+给你一份实战核对清单。拿着企业的接口文档（或 Postman 调试截图），逐条对照：
+
+| # | 核对项 | 怎么看 | 不满足怎么办 |
+|---|--------|--------|---------------|
+| 1 | 端点路径 | 文档里的请求 URL 是不是 `/chat/completions` 结尾？能不能拼成 `{baseUrl}/chat/completions`？ | 路径形态都对不上 → 接不了（让企业改接口，或上转换层） |
+| 2 | 流式支持 | 文档有没有 `stream: true` 参数？响应是不是 SSE（`data: {...}` 分块）？ | 不支持流式 → 接不了 |
+| 3 | 消息结构 | `messages` 数组里每条是不是 `{ role, content }`？role 认不认 `system`/`user`/`assistant`/`tool`？ | 结构差太多 → 接不了；只不认 `tool` 角色 → 可上转换层改消息角色 |
+| 4 | 流式 chunk | 响应 chunk 里有没有 `choices[0].delta.content`？工具调用有没有 `delta.tool_calls`？ | 字段名不一样 → 若是 Anthropic 格式（`content_block_delta`）改用 `api: "anthropic-messages"`；其它非主流格式接不了 |
+| 5 | 鉴权方式 | 文档说怎么带 Key？是不是 `Authorization: Bearer`？ | 是 Bearer → 只要 Key 配好就自动带上（无需额外开关）；其它方式 → 用 `headers` 字段自定义 |
+| 6 | 最大输出字段 | 文档认 `max_completion_tokens` 还是只认 `max_tokens`？ | 只认旧版 → `"maxTokensField": "max_tokens"` |
+| 7 | 工具调用 | 是否支持 `tools` 字段？认不认工具定义里的 `strict`？ | 不支持 tools → 清空工具集；不认 strict → `"supportsStrictMode": false` |
+| 8 | usage 统计 | 流式响应最后一个 chunk 里有没有 `usage`？是数字还是空？ | 返回空/null → `"supportsUsageInStreaming": false`（否则本次用量统计为 0、成本算不出；接口不认识 `stream_options` 参数时请求会直接 400） |
+| 9 | 推理模型思考参数 | 如果接的是推理模型，文档里开启思考的参数长啥样？ | 需要的话填 `thinkingFormat`（见下方 compat 说明） |
+
+前 4 条任一不满足，基本接不了（需要企业改接口，或上转换层）。第 5~9 条不满足，靠下面的 compat 字段补救。
+
+
+
+compat 的配置写在 `models.json` 的模型定义里，长这样：
+
+```json
+{
+  "providers": {
+    "enterprise": {
+      "baseUrl": "http://内网地址/api/llm",
+      "api": "openai-completions",
+      "apiKey": "你的_appKey",
+      "models": [
+        {
+          "id": "internal-model",
+          "name": "内网模型",
+          "compat": {
+            "supportsUsageInStreaming": false,
+            "maxTokensField": "max_tokens",
+            "supportsDeveloperRole": false
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+**compat 是什么？** 一句话：Pi Agent 默认按标准 OpenAI 协议发请求，但**企业接口往往和标准有出入**——比如某个参数不认识、某个字段名不一样。compat 就是用来声明这些出入的开关：写了它，SDK 就知道哪些参数别发、哪些字段该换名，请求才能被企业接口正常接受。
+
+所有字段都可选，**大多数情况一个都不用填**：先跑通，报什么错再回来对号入座。真正常用的就下面三类
+
+（完整 21 个字段见 SDK 源码 `OpenAICompletionsCompat`，`packages/ai/src/types.ts`）：
+
+**① 企业接口只认老版参数（最常见）**
+
+| 字段 | 什么时候填 |
+|------|-----------|
+| `maxTokensField: "max_tokens"` | 企业的模型接口只认旧版 `max_tokens`、不认识新版 `max_completion_tokens` 时。不填的话输出上限设置可能被忽略，甚至报错 |
+| `supportsUsageInStreaming: false` | 企业的模型接口流式返回的 `usage` 是空串/null，或接口不认识 `stream_options` 参数时。不填的话 token 用量统计为 0、成本算不出来 |
+| `supportsStore: false` | 企业的模型接口不认识 `store` 参数、收到就报 unknown field 时 |
+
+**② 消息 / 角色 / 工具差异**
+
+| 字段 | 什么时候填 |
+|------|-----------|
+| `supportsDeveloperRole: false` | 企业的模型接口只认 `system` 角色、收到 `developer` 角色就报错时（推理模型才涉及） |
+| `supportsStrictMode: false` | 企业的模型接口的工具定义里不支持 `strict` 参数、带了就报错时 |
+| `requiresAssistantAfterToolResult: true` | 企业的模型接口不接受「工具结果」后面直接跟「用户消息」、要求中间再补一条 assistant 消息时 |
+| `requiresToolResultName: true` | 企业的模型接口强校验工具结果必须带 `name` 字段、不带就报错时 |
+
+**③ 思考参数格式**（仅推理模型 `reasoning: true` 涉及）
+
+如果你接的是**推理模型**（回答前先思考的那种），企业文档里「开启思考」的参数写法可能和标准 OpenAI 不一样。`thinkingFormat` 就是用来切换这个写法的——DeepSeek / z.ai / Together / OpenRouter 各有各的格式，**内置的都自动猜好了**；自建网关一般走默认 `"openai"`（顶层 `reasoning_effort`），大多能用。`supportsReasoningEffort: false` 在企业接口不认识 `reasoning_effort` 参数时填。**企业文档里压根没提思考参数的，直接当普通模型用，这条不用管。**
+
+其余字段（提示缓存 `cacheControlFormat` / `supportsLongCacheRetention`，厂商专用 `zaiToolStream` / `sessionAffinityFormat` / `deferredToolsMode` 等）企业内网基本用不到，**不用管**。
+
+**排查步骤（三步）**：① 接口本身能通、但 Pi Agent 调用报错 → 看报错信息（`unknown field` / `400` / `401`），对照上面三类找字段；② 工具调用报错 → 先试 `supportsStrictMode: false`；③ 成本统计为 0 → 检查 `supportsUsageInStreaming`。
+
+
+#### 4.2.3 差异太大怎么办：转换层
+
+compat 能处理的是「小差异」——参数、字段、角色这些小开关。但有些网关差异 compat 处理不了：
+
+- role 只认 `system`/`user`/`assistant`，不认 `tool`（工具调用直接不可用——compat 里没有改 role 的开关）；
+- 路径特殊（比如要求 `/chat/completions/V2`，而 SDK 只会拼 `/chat/completions`）；
+- 消息结构整体都不是 `{role, content}`。
+
+这时候的思路是**转换层**：在 Pi Agent 和目标网关之间插一层适配，把 Pi Agent 的请求改写成网关能接受的样子，再把网关的响应翻译回 OpenAI 格式。两种做法：
+
+1. **本地反向代理（最轻量，推荐先试）**：起一个本地 HTTP 服务，`models.json` 的 `baseUrl` 指向它；代理收到 Pi Agent 的请求后改写再转发给真实网关，响应原样流式回传。几十行代码、不动 SDK，能解决几乎所有协议层面的差异：改消息角色（如 tool → user）、改鉴权头格式、拼特殊路径、删掉网关不认的字段……缺点是多一层网络、要保活。
+2. **自定义 API provider（SDK 级正规方案）**：用 `registerApiProvider`（来自 `@earendil-works/pi-ai/compat`）注册一个自定义 API 类型，完全接管请求组装和响应解析，Pi Agent 按你的协议定义走。工程量中等，适合确定会长期使用的内部协议。（注：还有一条更底层的路是 `ModelRuntime.registerProvider` + 自实现 `streamSimple`，那是 provider 级，比这里的 API 级更重。）
+
+> 一个必须想清楚的边界：**转换层解决「协议形态」问题，解决不了「能力缺失」**——网关/模型本身不支持流式、不支持工具调用，转换层变不出来，只能接受不支持这些能力的代价。
+
+#### 4.2.4 记住两点
+
+1. **企业自建模型/网关不一定适合直接接**，接口文档还常常写得不全，别被「OpenAI 兼容」四个字迷惑；
+2. **一切以实际测试为准**：能通就接、微调 compat 即可；报错就对照清单找原因；compat 处理不了再上转换层——**文档说支持 ≠ 真的支持**。
+
+### 4.3 不支持 Function Calling 的代价
+
+部分企业内网网关和某些小模型，不支持 Function Calling（工具调用）。Pi Agent 默认会往请求里带 `tools` 参数——网关要是不认这个字段，直接报错。
+
+最简单的解法，是清空工具集，让请求里不再出现 `tools`：
+
+```typescript
+// 清空 Pi 自带工具，避免往请求里塞 tools 参数
+session.setActiveToolsByName([]);
+```
+
+但**这个解法代价很大**，必须想清楚再选。一旦工具集被清空，Agent 就退化成纯聊天机器人，Pi Agent 下面这些能力会**全部失效**：
+
+- **内置工具**（read / bash / edit / write，默认启用的这 4 把；grep / find / ls 虽内置但默认本就不开）全部不可用；
+- **自定义工具**（第 5 章要讲的）全部不可用；
+- **工具拦截**（第 6 章讲的 `tool_call` 事件）全部失效——因为根本没有工具调用事件；
+- **ReAct 循环**退化成「一问一答」，Agent 不会主动调外部世界。
+
+换句话说，清空工具集的 Agent，已经算不上「Agent」了，就是个套了系统提示词的聊天接口。
+
+要是你的业务确实必须接这种模型，又确实需要工具调用能力，主流做法是 **基于提示词的变通方案（Prompt-Based）**——把工具描述写进系统提示词，让模型用 ```` ```tool_call ```` 这种特定格式输出 JSON，你在代码里解析、执行、再把结果作为下一轮 prompt 喂回去。这套方案要自己实现工具循环、自己解析模型输出，工程量大且不稳定，本教程主线不展开。（还有一条更底层的路：注册自定义 provider 时自己实现 `streamSimple` 流式函数，但工作量更大，入门阶段不推荐。）
+
+---
+
+到这里，你已经能接入任何 LLM 服务了——内置 Provider 用 `models.json` 配、用户自带 Key 用 `setRuntimeApiKey`、企业内网模型先验证再接入、小差异用 `compat` 对齐、大差异用转换层兜底。
+
+下一章，我们看 Agent 的另一个人设入口：**系统提示词**——怎么把 Pi Agent 默认的编程人设，换成你要的垂直角色。
+
+
+---
+
+## 附录：知识点—源码对照（v0.83.0）
+
+> 本章涉及的 API / 机制，在 `repo/`（v0.83.0 checkout）中的源码位置。**行号会随版本漂移**，定位时以符号名为主、行号为辅。
+
+| 知识点 | 源码位置 | 一句话说明 |
+|--------|---------|-----------|
+| `getAvailable()` 按鉴权过滤 | `repo/packages/ai/src/models.ts:394-409` | Provider 无 auth → 返回空数组 |
+| `getModel()` 不检查 Key | `ai/src/models.ts:272` | 同步返回 `Model | undefined` |
+| `setRuntimeApiKey(provider, key)` | `model-runtime.ts:400-417` | 运行时注入 Key，优先级最高 |
+| Key 解析优先级链 | `ai/src/auth/resolve.ts`；`runtime-credentials.ts` | runtime override > auth.json > models.json apiKey > env |
+| 自定义 API 类型 `registerApiProvider` | `repo/packages/ai/src/compat.ts:126` | 来自 `@earendil-works/pi-ai/compat`，接管请求组装/响应解析 |
+| 自定义 Provider + `streamSimple` | `model-runtime.ts`；`provider-composer.ts:44-68` | provider 级，可自带流式函数（比 API 级更重） |
+| models.json schema | `model-config.ts:154-200` | ModelDefinitionSchema + ProviderConfigSchema |
+| model 默认值 | `provider-composer.ts:144-158` | name ?? id；contextWindow ?? 128000；maxTokens ?? 16384 |
+| `api` 字段取值 | `ai/src/types.ts:16-26` | openai-completions / anthropic-messages / google-generative-ai / ... |
+| auth.json 凭证结构 | `ai/src/auth/types.ts:17-21` | `{ type:"api_key", key?, env? }` |
+| 内置 Provider 环境变量白名单 | `ai/src/env-api-keys.ts:79-114` | 硬编码 envMap，自定义 provider 名无自动 env 查找 |
+| OpenAI 兼容请求组装 | `ai/src/api/openai-completions.ts:673-739` | `stream:true` 恒发；store/stream_options 条件性 |
+| compat 字段（21 个） | `ai/src/types.ts:519-572` | OpenAICompletionsCompat：maxTokensField / supportsUsageInStreaming / ... |
+| `setActiveToolsByName([])` 清空工具 | `agent-session.ts:926` | 让请求不带 tools 参数 |

@@ -1,0 +1,30 @@
+{
+  "name": "pi-sdk-learn-code",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi Agent SDK 二次开发教程配套代码（第 1~7 章）",
+  "scripts": {
+    "01": "tsx L01-env/01-hello.ts",
+    "02": "tsx L02-arch/03-express-ask.ts",
+    "03": "tsx L03-model/03a-model-management.ts",
+    "04a": "tsx L04-prompt/04a-replace-prompt.ts",
+    "04b": "tsx L04-prompt/04b-layered-prompt.ts",
+    "04c": "tsx L04-prompt/04c-strip-cwd.ts",
+    "05a": "tsx L05-tools/05a-query-data.ts",
+    "06a": "tsx L06-extensions/06a-limit-guard.ts",
+    "06b": "tsx L06-extensions/06b-see-all-events.ts",
+    "07": "tsx L07-streaming/07a-sse-server.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "express": "^5.2.1",
+    "typebox": "^1.1.39"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "tsx": "^4.22.4"
+  }
+}

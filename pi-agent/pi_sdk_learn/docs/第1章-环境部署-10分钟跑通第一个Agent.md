@@ -243,7 +243,7 @@ import { createAgentSession, ModelRuntime } from "@earendil-works/pi-coding-agen
 //     ↑ 从 SDK 里「导入」要用的两个工具，就像 JS 里 require
 
 // 1. 加载 ~/.pi/agent/ 下的配置（models.json、auth.json）
-//    await 是因为「读文件」是异步操作，得等它读完才能往下走
+//    ModelRuntime.create() 返回 Promise；await 暂停当前执行路径，等它完成后再继续
 const modelRuntime = await ModelRuntime.create();
 
 // 2. 拿到「配了 Key、真正能用」的模型列表
@@ -275,7 +275,7 @@ try {
   });
 
   console.log(`🤖 使用模型：${model.provider}/${model.id}\n`);
-  await session.prompt("用一句话介绍你自己。");   // 发问，等 Agent 答完才继续
+  await session.prompt("用一句话介绍你自己。");   // 当前执行路径在这里等 Promise；Agent 运行时仍能处理流式事件
   console.log("\n");
 } finally {
   session.dispose();   // 释放资源（关监听、断连接）。用 try/finally 包起来，保证出错也能清理
@@ -299,7 +299,7 @@ npx tsx L01-env/01-hello.ts
 - `ModelRuntime.create()` 读了你刚配的 `models.json`，把可用模型列出来；
 - `createAgentSession()` 建了个 Agent 会话，内部自动注册工具、加载资源、连上 LLM；
 - `session.subscribe()` 订阅事件流——Agent 思考、调工具、生成文字，每一步都给你推事件；
-- `session.prompt()` 把你的问题发给 Agent，等它回完。
+- `session.prompt()` 把你的问题发给 Agent，返回一个 Promise；`await` 暂停当前执行路径，等这一轮结束后再继续。
 
 具体每一行背后做了什么、为什么这么写、`subscribe` 里那一串判断是什么意思——**第 2 章会逐行讲清楚。**
 
@@ -309,17 +309,65 @@ npx tsx L01-env/01-hello.ts
 
 ---
 
-
-
----
-
 ## 八、TS 与 Python 代码对照表
 
-> 会 Python 就能读懂本教程的全部代码。这张表把后面 7 章里出现的 TS 写法，和 Python 一一对照，分三层：第一层是「不认识就读不动」的核心语法，第二层是「认识就行、不用会写」的类型标注，第三层是「和 Python 几乎一样、对一遍确认」的控制流。看不懂哪行，回这儿查。
+> 会 Python 能帮你快速认出很多写法，但 **TS/JS 的代码块不靠缩进决定结构**。读代码时先看 `()`、`{}`、`[]` 怎么配对，再看缩进。下面只学本教程真正会反复出现的语法和异步心智模型，不要求背 API。
+
+### 先学会看括号：TS 不靠缩进分层
+
+Python 用缩进表达代码块；TypeScript / JavaScript 主要靠括号表达结构，缩进只是给人看的。
+
+```typescript
+if (ok) {
+  run();
+}
+```
+
+就算写成：
+
+```typescript
+if(ok){run();}
+```
+
+结构也没有变。读下面这种代码时：
+
+```typescript
+session.subscribe((event) => {
+  console.log(event);
+});
+```
+
+先把它展开成：
+
+```typescript
+session.subscribe(
+  (event) => {
+    console.log(event);
+  }
+);
+```
+
+最外层是 `subscribe(...)`，它接收一个参数；这个参数恰好又是一个函数 `(event) => { ... }`。
+
+所以最后的：
+
+```text
+});
+```
+
+要拆成：
+
+```text
+}   箭头函数的函数体结束
+)   subscribe(...) 调用结束
+;   这一条语句结束
+```
+
+以后看到 `xxx((a) => { ... });`，先翻译成一句人话：**调用 `xxx()`，把一个函数作为参数传进去。**
 
 ### 第一层：7 个核心语法（贯穿全书，必须认识）
 
-这些写法每章都出现，是读懂示例的前提。好在它们在 Python 里都有直接对应。
+这些写法每章都会出现。目标不是背语法，而是看到它时能立刻知道“这段代码在做什么”。
 
 **① 导入与变量声明**
 
@@ -337,36 +385,163 @@ NAME = "Pi"             # Python 没有 const，约定大写表示常量
 count = 0
 ```
 
-**② 异步：async / await**
+**② 异步：Promise / async / await**
 
-和 Python 几乎一模一样——`await` 等一个异步操作跑完再往下。本教程里读文件、发请求、创建会话，都要 `await`。
+这里不要只记“`await` 等完再往下”。TS/JS 里更重要的是先认清三者关系：
+
+```text
+异步函数 / 异步 API
+        ↓
+返回 Promise（一个未来才会完成的结果）
+        ↓
+await Promise
+        ↓
+暂停当前 async 函数 / 当前执行路径
+        ↓
+Promise 完成后，从 await 这里恢复
+```
+
+Promise 最小写法是：
+
+```typescript
+const p = new Promise((resolve, reject) => {
+  // 成功时：把 Promise 标记为 fulfilled，并交出结果
+  resolve("完成");
+
+  // 失败时：把 Promise 标记为 rejected，并交出错误
+  // reject(new Error("失败"));
+});
+```
+
+先只记两个出口：
+
+```text
+resolve(value) → 成功
+reject(error)  → 失败
+```
+
+上层如果这样等：
+
+```typescript
+try {
+  const result = await p;
+  console.log(result);
+} catch (error) {
+  console.error(error);
+}
+```
+
+那么：
+
+```text
+resolve("完成")
+→ await 恢复
+→ result === "完成"
+
+reject(error)
+→ await 恢复时抛异常
+→ 进入 catch
+```
+
+`async` 还有一个很关键的规则：**`async function` 的返回值会自动 Promise 化。**
+
+```typescript
+async function foo() {
+  return 123;
+}
+```
+
+调用它时：
+
+```typescript
+const p = foo();        // Promise<number>
+const x = await foo();  // x === 123
+```
+
+可以先近似理解成：
+
+```typescript
+function foo() {
+  return Promise.resolve(123);
+}
+```
+
+所以不是“所有函数的 `return` 都会包 Promise”，而是：
+
+```text
+普通 function + return x
+→ 直接返回 x
+
+async function + return x
+→ 调用者得到 Promise.resolve(x)
+```
+
+回到本教程：
 
 ```typescript
 const modelRuntime = await ModelRuntime.create();
 await session.prompt("你好");
 ```
 
+更准确的理解是：`ModelRuntime.create()`、`session.prompt()` 给你一个 Promise；`await` **暂停当前执行路径**，等 Promise settle 后再恢复。它不是把整个 JavaScript 程序“卡死在那里”。等待期间，运行时仍然可以处理已经就绪的事件、网络结果、定时器、流式输出等工作。
+
+Python 的 `asyncio` 在表面写法和高层心智模型上很接近：当前 coroutine 遇到 `await` 会暂停，event loop 可以运行其他可运行任务；但底层运行时并不是同一个实现。
+
 ```python
 model_runtime = await ModelRuntime.create()
 await session.prompt("你好")
 ```
 
-**③ 函数：箭头函数 `=>`**
+**③ 函数：箭头函数 `=>` 与 callback**
 
-TS 的匿名函数，长得像箭头。单行能省 `return`，多行要花括号 + `return`。对应 Python 的 `lambda`（单行）或 `def`（多行）。
+箭头函数就是函数。最重要的不是背 `=>`，而是认出“函数也能当作参数传给另一个函数”。
+
+单行：
 
 ```typescript
-const add = (a, b) => a + b;                            // 单行，自动 return
-session.subscribe((event) => { console.log(event); });  // 多行，要花括号
+const add = (a, b) => a + b;
 ```
 
+近似等价于：
+
+```typescript
+function add(a, b) {
+  return a + b;
+}
+```
+
+Pi 里更常见的是 callback：
+
+```typescript
+session.subscribe(
+  (event) => {
+    console.log(event);
+  }
+);
+```
+
+把匿名函数先起个名字，就更直观：
+
+```typescript
+function onEvent(event) {
+  console.log(event);
+}
+
+session.subscribe(onEvent);
+```
+
+这两种写法在这里表达的是同一件事：**把 `onEvent` 登记给 session；以后 session 有事件时，再调用这个函数并把 `event` 传进来。**
+
+对应 Python：
+
 ```python
-add = lambda a, b: a + b
-# 多行的话用 def：
 def on_event(event):
     print(event)
+
 session.subscribe(on_event)
 ```
+
+注意：`subscribe` 不是在那里不停循环检查事件。它只是先保存 callback；之后真正发生事件时，由 session 主动调用已登记的函数。
 
 **④ 解构赋值：从对象 / 数组里挑字段**
 
@@ -499,9 +674,9 @@ model = model_runtime.get_model("zhipu", "glm-4")  # Python 无 ! 语法
 name: Optional[str] = None                         # 等价于 str | None
 ```
 
-### 第三层：控制流（和 Python 几乎一样，对一遍确认）
+### 第三层：控制流（和 Python 高度相似，对一遍确认）
 
-下面这些和 Python 高度相似，主要差别是「括号 vs 缩进」「花括号 vs 冒号」。过一遍就能对上号，后面遇到不会再卡。
+下面这些和 Python 高度相似。区别主要是：TS 用圆括号和花括号表示条件与代码块，Python 用冒号和缩进。**TS 的缩进不决定语法结构。**
 
 **① 条件：if / else 与三元运算符**
 
@@ -596,7 +771,7 @@ match event["type"]:
 
 ---
 
-这三层覆盖了本教程 7 章里出现的全部 TS 写法。后面遇到陌生的，回这儿查就行。真要系统学 TS，那是另一门课的事——但你跟着这本教程走完，不耽误。
+这三层覆盖了本教程 7 章里出现的主要 TS 写法。后面遇到陌生的，回这儿查就行。真要系统学 TS，那是另一门课的事——但你跟着这本教程走完，不耽误。
 
 ---
 
@@ -615,7 +790,7 @@ match event["type"]:
 | `getAvailable()` 过滤逻辑 | `repo/packages/ai/src/models.ts:394-409` | Provider 没配 Key 就返回空数组 |
 | 入口导出 `createAgentSession`/`ModelRuntime` | `index.ts:180,206` | 从 `@earendil-works/pi-coding-agent` 顶层导出 |
 | 事件 `message_update` + `text_delta` + `.delta` | `agent-session.ts:740-746`；`ai/src/types.ts:504` | 文本流的字段名是 `delta` |
-| `subscribe` / `prompt` / `dispose` | `agent-session.ts:800,1114,837` | subscribe 返回取消订阅；prompt 阻塞；dispose 清理 |
+| `subscribe` / `prompt` / `dispose` | `agent-session.ts:800,1114,837` | subscribe 返回取消订阅；prompt 等待本轮完成；dispose 清理 |
 | Node 版本要求 `>=22.19` | 三个包的 `package.json` engines | `"engines":{"node":">=22.19.0"}` |
 | models.json schema 字段 | `model-config.ts`（ModelsConfigSchema） | `providers[].{baseUrl,api,apiKey,models[{id,name}]}` |
 | `$VAR` / `${VAR}` / `!cmd` 插值 | `resolve-config-value.ts` | apiKey 等字段支持环境变量/命令插值 |

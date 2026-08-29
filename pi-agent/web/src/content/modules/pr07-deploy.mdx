@@ -35,8 +35,6 @@ prev: pr06-events
 
 本章选择**进程内嵌 SDK**：本来就用 Node 写 Web 服务，直接 `import` 最直接，不需要再启动子进程；而且控制力最强，前几章的扩展能力都能继续用。
 
-
-
 选定进程内嵌后，还有一个问题：这个 Node 服务提供给谁？两种做法——**只服务自家前端**（最简单，全栈 JS 一条链路），或**封装成独立的 Agent 服务对外开放**（任何语言都能通过 HTTP 调用）。本章采用后者，因为它涵盖了前者，并且能讲清楚「怎么把 pi-agent 对外暴露成一个与语言无关的接口」：
 
 ```
@@ -156,7 +154,7 @@ app.listen(3000, () => console.log("→ http://localhost:3000"));
 
 代码里的 `translateEvent` 和 `sse` 是两个辅助函数：接口的响应是 SSE 流，推给前端的数据要按 SSE 格式传输，**`translateEvent` 的作用就是把 `subscribe` 监听到的事件，转换成前端要的 SSE 格式**（具体怎么实现，看仓库代码即可，核心是知道每个事件里有什么字段，第三节会讲）。`sse` 是拼消息的辅助函数。
 
-上面的代码片段省略了仓库中实际代码的几处健壮性处理（避免分散注意力）：`prompt` 抛错时走 `catch` 分支、给前端发一条 `error` 事件而不是让请求挂死；`req.on("close")` 里用 `settled` 标志防止 `prompt` 已结束后重复 `abort`；Express 还通过 `express.static` 托管了前端页面（`public/index.html`）。这些是常规 Web 服务健壮性写法，看仓库代码即可。
+上面的代码片段省略了仓库中实际代码的几处健壮性处理（避免分散注意力）：`prompt` 抛错时走 `catch` 分支、给前端发一条 `error` 事件而不是让请求挂死；连接断开时要避免 `prompt` 已结束后重复 `abort`；Express 还通过 `express.static` 托管了前端页面（`public/index.html`）。这些是常规 Web 服务健壮性写法，看仓库代码即可。
 
 讲完这个接口，就得到了一个完整的 Agent 服务接口。给同事（或前端）的接口文档如下：
 
@@ -209,27 +207,312 @@ npx tsx L07-streaming/07a-sse-server.ts
 # 浏览器打开 http://localhost:3000
 ```
 
-### 补充：SSE 是什么
+### 补充：HTTP、SSE、WebSocket 到底差在哪
 
-> 这一节是背景知识，了解即可，不影响理解前面的内容。**对 SSE 已经有概念的读者，可以跳过。**
+> 这一节不是为了背网络协议，而是为了回答一个工程问题：**为什么这个 Agent Chat 用 SSE，而不是普通 HTTP 或 WebSocket？**
 
-接口响应设了 `text/event-stream` 头，前端用读流的方式接收。这层技术叫 **SSE（Server-Sent Events）**。
+先把层级固定住：
 
-一句话：**SSE 就是一个「不关闭」的 HTTP 响应。** 平时写接口，`res.json({...})` 写完后结束并关闭连接，客户端拿到完整结果；SSE 的区别是——**写完后不关闭连接，让它一直挂着，服务器随时可以再 `write` 一段数据，客户端就持续接收。** Agent 的回答是逐字产生的，用这种「不关闭的响应」正好一段段推过去。
-
-响应头要设成固定格式：
-
+```text
+业务消息（text / tool_start / done ...）
+        ↓
+HTTP / SSE / WebSocket
+        ↓
+TCP + TLS
+        ↓
+IP / 网络
 ```
+
+这里最容易混淆的一点是：**HTTP、SSE、WebSocket 通常都建立在可靠传输之上。** 连接还活着时，TCP 负责字节顺序、确认、丢包重传、流控和拥塞控制；SSE 和 WebSocket 不需要自己给某个丢失的 TCP 包“补包”。应用层真正要处理的是另一件事：**整条连接已经断掉之后，要不要重连、要不要恢复到上一个业务事件。**
+
+#### 1. 同一段内容，三种方式到底传什么
+
+假设服务端都要把：
+
+```json
+{"delta":"你好"}
+```
+
+发给前端。
+
+**普通 HTTP** 是一次 Request → 一次完整 Response：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: ...
+
+{"delta":"你好"}
+```
+
+程序里常见的是：
+
+```typescript
+res.json({ delta: "你好" });
+```
+
+响应完成，这一轮 HTTP 请求就结束了。
+
+**SSE** 仍然是 HTTP。它只在 Response 开头发一次 HTTP Header，然后保持同一个 Response Body 不结束，后面不断 `write()`：
+
+```http
+HTTP/1.1 200 OK
 Content-Type: text/event-stream
 Cache-Control: no-cache
-Connection: keep-alive
+
+event: text
+data: {"delta":"你"}
+
+event: text
+data: {"delta":"好"}
+
+event: done
+data: {}
+
 ```
 
-`text/event-stream` 标识这是 SSE 流；`no-cache` 和 `keep-alive` 防止中间代理缓存或中途断开。客户端（不只是浏览器，Java/Python 的 HTTP 库也一样）看到这个头，就知道按 SSE 方式接收。
+真正在线路上发送的是一串字节。SSE 用一个空行，也就是 `\n\n`，表示“一条 SSE event 到这里结束”：
 
-为什么用 SSE 不用 WebSocket？判断标准是：需要「服务器向客户端推」还是「双向互推」。Agent 对话属于前者（用户偶尔发、Agent 持续推），用 SSE；WebSocket 是双向的，对 Agent 对话场景偏重，只有像「多人实时协作画板」这种需要双向频繁推送的场景才需要。另外 SSE 基于 HTTP，不需要像 WebSocket 那样单独握手升级，更简单。
+```text
+event: text\n
+data: {"delta":"你"}\n
+\n
+```
 
-> SSE 消息的具体格式属于实现细节，需要时查仓库代码或 SSE 文档即可。这一节只要记住：**SSE 是个不关闭的响应，用来把 Agent 的过程一段段推给前端。**
+所以它不是“每次重新发一个 HTTP Header”，而是：
+
+```text
+一次 HTTP Response Header
+        +
+同一个 HTTP Response Body 持续追加 bytes
+```
+
+本章实际上是 **POST + HTTP streaming，响应体采用 SSE 的 wire format**。它不是必须依赖浏览器原生 `EventSource` 的 GET 模式；前端直接 `fetch()` 后读取 `response.body` 即可。
+
+**WebSocket** 一开始也借 HTTP 建连接，但会请求协议升级：
+
+```http
+GET /chat HTTP/1.1
+Upgrade: websocket
+Connection: Upgrade
+...
+```
+
+服务端返回：
+
+```http
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+...
+```
+
+从此以后不再继续写 HTTP Response Body，而是双方交换 **WebSocket Frame**：
+
+```text
+[WS Frame Header][{"type":"text","delta":"你"}]
+[WS Frame Header][{"type":"text","delta":"好"}]
+[WS Frame Header][{"type":"done"}]
+```
+
+Frame 自己带长度和边界，所以不需要像 SSE 那样用 `\n\n` 分隔事件。更重要的是，连接保持期间客户端也可以随时反向发送：
+
+```json
+{"type":"abort"}
+```
+
+或：
+
+```json
+{"type":"steer","message":"改看华南"}
+```
+
+这才是 WebSocket 的核心价值：**长期全双工。**
+
+#### 2. TCP 包丢了，谁负责重试
+
+不要把“业务事件重试”和“网络包重传”混在一起。
+
+```text
+HTTP / SSE / WebSocket
+          ↓
+         TCP
+          ↓
+  packet 丢失 / 乱序
+          ↓
+TCP ACK / sequence number / retransmission
+          ↓
+上层继续看到有序字节流
+```
+
+只要 TCP 连接仍然有效，HTTP、SSE、WebSocket 通常不需要自己处理某个网络包丢失。
+
+但如果 Wi-Fi 切换、机器休眠、NAT 超时等导致**整个连接死亡**：
+
+```text
+event 1 ✅
+event 2 ✅
+event 3 ✅
+------ connection dead ------
+event 4 ❌
+```
+
+这时旧 TCP 连接已经不存在，TCP 不能跨连接继续帮你补。应用层才需要决定：重新连接？重跑 Agent？从某个 event id 恢复？还是把这一轮判为失败？
+
+本章的 Agent 服务采用最简单的策略：**连接断开 → `session.abort()` → 这一轮取消；用户下一次重新发起 `/chat`。**
+
+#### 3. “服务端一直监听”与“长期维护客户端连接”不是一回事
+
+HTTP、SSE、WebSocket 服务都会一直：
+
+```typescript
+app.listen(3000);
+```
+
+这对应一个 **listening socket**：服务器的 3000 端口一直开门营业。
+
+客户端真正连进来以后，操作系统还会为每个连接建立一个 **connected socket**：
+
+```text
+                 listening socket :3000
+                         │
+             ┌───────────┼───────────┐
+             ▼           ▼           ▼
+          Client A    Client B    Client C
+           socket      socket      socket
+```
+
+讨论 SSE / WebSocket 的“长连接成本”时，担心的是下面这些具体客户端连接长期不释放，而不是最上面的 listening socket。
+
+普通 HTTP 的业务请求通常很快结束；而 SSE 至少要活到这一轮 Agent 完成，WebSocket 则可能活几分钟、几小时甚至更久。当然，现代 HTTP 有 keep-alive、HTTP/2 等连接复用机制，所以也不要理解成“每个普通 HTTP 请求都重新做一次 TCP 三次握手”。
+
+#### 4. 一个长期连接到底占什么资源
+
+每个活着的 connected socket 都要让系统记住一些状态：
+
+```text
+一个客户端连接
+    ↓
+OS Kernel Socket
+    ├── TCP state / sequence / ACK / timer
+    ├── send buffer
+    └── recv buffer
+
+Node 进程
+    ├── socket / req / res 对象
+    ├── event listener
+    └── 应用自己的 connection/session metadata
+
+如果有 TLS
+    └── 加密会话与缓冲状态
+```
+
+在 Unix/Linux 里，进程通过一个整数句柄引用 socket，这个整数叫 **file descriptor（fd）**：
+
+```text
+fd 4 → listening socket
+fd 5 → Client A socket
+fd 6 → Client B socket
+fd 7 → Client C socket
+```
+
+所以 10 万个长期连接，大致意味着数量级接近 10 万个 connected socket / fd，还要叠加它们的内核缓冲、Node 对象和业务状态。具体每连接占多少内存不是固定值，取决于 OS、runtime、TLS、buffer 配置和应用状态。
+
+生产环境一般还有代理层：
+
+```text
+Browser
+   ↓ connection #1
+Nginx / Gateway / Load Balancer
+   ↓ connection #2
+Node Agent Server
+```
+
+代理不只是“转一下数据”，它也要维护 downstream / upstream socket、buffer、timeout、连接映射；负载均衡器还要记“这个长连接当前绑定到哪个后端”。这就是所谓的 **proxy / load balancer connection resource**。
+
+所以：
+
+```text
+10 万 QPS
+```
+
+和：
+
+```text
+10 万 concurrent connections
+```
+
+是两个完全不同的压力指标。前者描述单位时间处理多少请求，后者描述同一时刻有多少连接还活着。
+
+#### 5. 三种方案的真正 trade-off
+
+| 维度 | 普通 HTTP | SSE / HTTP Streaming | WebSocket |
+|------|-----------|----------------------|-----------|
+| 通信模型 | 一问一答 | 一次请求，服务端连续答 | 双方随时发 |
+| 业务流生命周期 | 通常最短 | 活到本轮流结束 | 常常长期存在 |
+| 服务端流式输出 | 普通 JSON 不适合 | **非常适合** | 非常适合 |
+| 双向实时通信 | 弱 | 弱 / 需要另发请求 | **最好** |
+| 基础设施兼容 | **最好** | 很好 | 相对复杂 |
+| 应用状态复杂度 | **最低** | 中等 | **最高** |
+| 消息 framing | HTTP Body | `event/data + \n\n` 文本 framing | WebSocket Frame |
+| 小消息协议开销 | 视 HTTP 版本而定 | 文本 framing 相对大 | Frame header 较小 |
+| Binary | 可以传，但不是这种流式聊天的强项 | 不擅长 | **很好** |
+| 断线后恢复 | 重发请求 | 需要定义重连/恢复策略 | 需要定义重连/会话恢复 |
+
+SSE 的 `event:`、`data:`、JSON 包装确实有额外字节。如果真的“一 token 一 event”，相对开销会比较大：
+
+```text
+你
+```
+
+可能只有几个 UTF-8 bytes，但包成：
+
+```text
+event: text
+data: {"delta":"你"}
+
+```
+
+就变成几十个 bytes。实际工程通常会把很小的 delta 在很短时间窗内聚合后再发，例如每 10～50ms 合并一次；这样协议开销就不是主要矛盾。
+
+#### 6. 为什么 DataAgent 选 SSE
+
+本章的通信模式是：
+
+```text
+用户发一个 Prompt
+        ↓
+这一轮不再持续发送新的业务消息
+        ↓
+Agent 连续产生 text / thinking / tool events
+        ↓
+done
+        ↓
+用户下一句话再开下一轮 POST
+```
+
+它天然就是：
+
+```text
+HTTP Request
+      ↓
+Streaming HTTP Response
+      ↓
+Response End
+```
+
+因此 SSE / HTTP Streaming 和需求模型高度匹配：实现简单、能直接复用 HTTP 基础设施、前端也容易调试，没有必要为了一个本质上“单轮半双工”的 Turn 引入长期全双工 WebSocket。
+
+什么时候应该认真考虑 WebSocket？当需求变成：
+
+- Agent 生成途中用户频繁 `steer` / `abort` / 修改任务；
+- 多 Agent / 多人协作，服务器会主动推送与当前 HTTP 请求无关的事件；
+- 实时语音上下行；
+- 协作编辑、游戏等双方高频发送；
+- 一条长期连接里并发承载多个逻辑任务。
+
+这时 WebSocket 的全双工、低 framing overhead 和 binary frame 才真正产生价值，同时也要接受更复杂的连接生命周期、重连、会话绑定、消息顺序与并发控制。
+
+> **这一节最终只记三句话：**普通 HTTP 是“一次请求 → 一次完整响应”；SSE 是“一次请求 → 同一个 HTTP Response Body 持续追加事件”；WebSocket 是“HTTP 只负责握手，之后双方交换 WebSocket Frame”。三者网络丢包的基础可靠性主要由 TCP 提供，真正的工程差异在**业务通信模型和连接生命周期**。
 
 ---
 
@@ -272,7 +555,7 @@ Connection: keep-alive
 
 | 字段 | 含义 |
 |------|------|
-| `toolCallId` | 本次工具调用的唯一编号——和 `tool_execution_end` 配对，靠它把「开始」和「结束」对应到同一张卡片 |
+| `toolCallId` | 本次工具调用的唯一编号——和 `tool_execution_end` 配对，靠它把「开始」和“结束”对应到同一张卡片 |
 | `toolName` | 工具名，如 `"query_data"` |
 | `args` | 传给工具的参数，如 `{"column": "地区", "operator": "=", "value": "华东"}` |
 
@@ -285,7 +568,7 @@ Connection: keep-alive
 | `result` | 工具返回的结果对象——文字内容在 `result.content[0].text` |
 | `isError` | 是否执行失败（`true` 时前端把卡片标红）|
 
-关于「何时结束」：接口代码里 `done` 是在 `prompt()` 的 `finally` 里发的，没有去监听 `agent_end` 或 `agent_settled`。原因是 `agent_end` 每轮循环结束都发（Agent 默认开启自动重试，LLM 返回异常时会重试一轮，`agent_end` 就多发一次，还带 `willRetry: true`），用它判断结束会提前恢复输入框；`agent_settled` 虽然是彻底结束的收尾事件、可以用，但在单接口模式下，`prompt()` 这个 Promise 本身就是更直接的终局——它结束时 `agent_settled` 也已经发过了，不如直接用 `finally`。
+关于“何时结束”：接口代码里 `done` 是在 `prompt()` 的 `finally` 里发的，没有去监听 `agent_end` 或 `agent_settled`。原因是 `agent_end` 每轮循环结束都发（Agent 默认开启自动重试，LLM 返回异常时会重试一轮，`agent_end` 就多发一次，还带 `willRetry: true`），用它判断结束会提前恢复输入框；`agent_settled` 虽然是彻底结束的收尾事件、可以用，但在单接口模式下，`prompt()` 这个 Promise 本身就是更直接的终局——它结束时 `agent_settled` 也已经发过了，不如直接用 `finally`。
 
 ---
 
@@ -294,12 +577,13 @@ Connection: keep-alive
 到这里，把 Agent 封装成 Web 服务的核心内容就讲完了。总结一下：
 
 - **整体流程**：组装 DataAgent 拿到 `session` → 接口里用 session 的三个能力（`subscribe` 收事件、`prompt` 发消息、`abort` 打断）→ 前端发 POST、读响应流。
-- **SSE**：一个「不关闭」的 HTTP 响应，用来把 Agent 的过程一段段推给前端。
+- **SSE**：本章用的是 POST + HTTP Streaming，响应体采用 SSE event 格式；一个 HTTP Response 可以在本轮 Agent 运行期间持续 `write()` 多个事件。
+- **协议选型**：普通 HTTP 适合一问一答，SSE 适合“用户发一次、服务端连续推”，WebSocket 适合真正的长期双向高频通信；TCP 负责连接内的可靠字节传输，应用层负责断线后的重连/恢复策略。
 - **核心：`session.subscribe`**：前端要展示什么，在 subscribe 的事件里通常都有对应；订阅这些事件、翻译成前端要的格式推送出去。**这是 pi-agent 在 Web 集成里的关键作用。**
 
 不过，目前的 Agent 服务仍是**单人专用**——一个 `AgentSession`，同一时间只服务一个用户。要支持多用户并发（每人有独立的会话历史、互不影响），需要做会话隔离，这是进阶内容，本教程不展开，可以参考 SDK 官方文档。
 
-回顾整个教程走过的内容：第 1 章跑通第一个 Agent；第 2 章读懂核心架构；第 3 章接入各种模型；第 4 章换上垂直人设；第 5 章给 Agent 装上业务工具；第 6 章挂上事件钩子；第 7 章把事件流推送到浏览器。一个「能调用业务、能挂事件、能流式输出」的 Agent Web 服务，到这里就能搭建起来了。接下来，就是把这些能力应用到实际业务中。
+回顾整个教程走过的内容：第 1 章跑通第一个 Agent；第 2 章读懂核心架构；第 3 章接入各种模型；第 4 章换上垂直人设；第 5 章给 Agent 装上业务工具；第 6 章挂上事件钩子；第 7 章把事件流推送到浏览器。一个“能调用业务、能挂事件、能流式输出”的 Agent Web 服务，到这里就能搭建起来了。接下来，就是把这些能力应用到实际业务中。
 
 ---
 
